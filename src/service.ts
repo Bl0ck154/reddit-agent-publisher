@@ -243,7 +243,7 @@ export class PublisherService {
     try {
       const database = this.store.db.pragma("integrity_check");
       const adapter = await this.adapter().diagnose(live);
-      return envelope({ result: { database, state_dir_mode: (fs.statSync(this.config.stateDir).mode & 0o777).toString(8), socket: this.config.socketPath, adapter } });
+      return envelope({ result: { database, state_dir_mode: (fs.statSync(this.config.stateDir).mode & 0o777).toString(8), cdp_endpoint: this.config.cdpUrl, adapter } });
     } catch (error: any) {
       return this.fail(error);
     }
