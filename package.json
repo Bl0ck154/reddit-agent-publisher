@@ -23,6 +23,7 @@
   "engines": {
     "node": ">=22"
   },
+  "keywords": ["reddit", "mcp", "playwright", "human-in-the-loop"],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Bl0ck154/reddit-agent-publisher.git"
