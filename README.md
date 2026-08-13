@@ -13,6 +13,8 @@ The core workflow is deliberately simple:
 
 > **prepare → preview → approve → execute**
 
+![Publishing workflow](assets/workflow.png)
+
 Nothing is submitted during preparation or preview. An external change is only executed after approval of the exact current preview.
 
 ## Why this project exists
