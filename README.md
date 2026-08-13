@@ -68,7 +68,7 @@ flowchart LR
 ```bash
 git clone https://github.com/Bl0ck154/reddit-agent-publisher.git
 cd reddit-agent-publisher
-npm install
+npm ci
 npm run build
 ```
 
@@ -187,7 +187,7 @@ npm run check
 
 ## Release history
 
-See [CHANGELOG.md](CHANGELOG.md). The latest public release is available on the [Releases](https://github.com/Bl0ck154/reddit-agent-publisher/releases) page.
+See [CHANGELOG.md](CHANGELOG.md) for notable changes. Published versions are available under [GitHub Releases](https://github.com/Bl0ck154/reddit-agent-publisher/releases).
 
 ## Limitations
 
