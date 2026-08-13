@@ -5,6 +5,10 @@ import path from "node:path";
 export interface Config {
   stateDir: string;
   cdpUrl: string;
+  socketPath: string;
+  chromePath: string;
+  display: string;
+  browserIdleSeconds: number;
   approvalTtlSeconds: number;
   mutationCooldownSeconds: number;
   redditMetadataCacheSeconds: number;
@@ -22,6 +26,10 @@ export function loadConfig(): Config {
   return {
     stateDir,
     cdpUrl: String(process.env.PUBLISHER_CDP_URL ?? file.cdpUrl ?? "http://127.0.0.1:9222"),
+    socketPath: String(file.socketPath ?? "/run/reddit-agent-publisher/publisher.sock"),
+    chromePath: String(process.env.PUBLISHER_CHROME ?? file.chromePath ?? "/opt/google/chrome/google-chrome"),
+    display: String(process.env.DISPLAY ?? file.display ?? ":98"),
+    browserIdleSeconds: Number(file.browserIdleSeconds ?? 90),
     approvalTtlSeconds: Number(file.approvalTtlSeconds ?? 900),
     mutationCooldownSeconds: Number(file.mutationCooldownSeconds ?? 15),
     redditMetadataCacheSeconds: Number(file.redditMetadataCacheSeconds ?? 900),
@@ -33,7 +41,7 @@ export function loadConfig(): Config {
 }
 
 export function ensureState(config: Config): void {
-  for (const dir of [config.stateDir, `${config.stateDir}/artifacts`, `${config.stateDir}/tmp`]) {
+  for (const dir of [config.stateDir, `${config.stateDir}/profiles`, `${config.stateDir}/artifacts`, `${config.stateDir}/tmp`]) {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     fs.chmodSync(dir, 0o700);
   }
