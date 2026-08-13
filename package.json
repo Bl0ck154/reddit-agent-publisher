@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "description": "User-controlled Reddit workflow tooling with MCP and browser sessions.",
   "type": "module",
+  "bin": {
+    "pubctl": "dist/cli.js",
+    "publisher-mcp": "dist/mcp.js"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "node --test dist/tests/*.test.js",
