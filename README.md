@@ -1,5 +1,7 @@
 # Reddit Agent Publisher
 
+[![CI](https://github.com/Bl0ck154/reddit-agent-publisher/actions/workflows/ci.yml/badge.svg)](https://github.com/Bl0ck154/reddit-agent-publisher/actions/workflows/ci.yml)
+
 **User-controlled Reddit workflow tooling for MCP clients and browser-based integrations.**
 
 Reddit Agent Publisher connects a narrow application interface to a Reddit session that you control in Chrome. Authentication stays in the browser while the service manages local drafts, previews, approvals, and audit state.
