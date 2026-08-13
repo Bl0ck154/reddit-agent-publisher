@@ -1,6 +1,7 @@
 # Reddit Agent Publisher
 
 [![CI](https://github.com/Bl0ck154/reddit-agent-publisher/actions/workflows/ci.yml/badge.svg)](https://github.com/Bl0ck154/reddit-agent-publisher/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Bl0ck154/reddit-agent-publisher)](https://github.com/Bl0ck154/reddit-agent-publisher/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js 22+](https://img.shields.io/badge/Node.js-22%2B-brightgreen.svg)](package.json)
 
@@ -178,11 +179,15 @@ src/
 ## Development
 
 ```bash
-npm install
+npm ci
 npm run check
 ```
 
 `npm run check` builds the TypeScript project and runs the test suite. The same check runs in GitHub Actions on pushes and pull requests.
+
+## Release history
+
+See [CHANGELOG.md](CHANGELOG.md). The latest public release is available on the [Releases](https://github.com/Bl0ck154/reddit-agent-publisher/releases) page.
 
 ## Limitations
 
