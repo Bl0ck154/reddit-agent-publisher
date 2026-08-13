@@ -23,5 +23,13 @@
   "engines": {
     "node": ">=22"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Bl0ck154/reddit-agent-publisher.git"
+  },
+  "homepage": "https://github.com/Bl0ck154/reddit-agent-publisher#readme",
+  "bugs": {
+    "url": "https://github.com/Bl0ck154/reddit-agent-publisher/issues"
+  },
   "license": "MIT"
 }
