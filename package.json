@@ -1,6 +1,7 @@
 {
   "name": "reddit-agent-publisher",
   "version": "0.1.0",
+  "description": "User-controlled Reddit workflow tooling with MCP and browser sessions.",
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
