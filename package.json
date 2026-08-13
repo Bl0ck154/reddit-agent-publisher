@@ -7,10 +7,17 @@
     "pubctl": "dist/cli.js",
     "publisher-mcp": "dist/mcp.js"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "node --test dist/tests/*.test.js",
-    "check": "npm run build && npm test"
+    "check": "npm run build && npm test",
+    "prepack": "npm run check"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.4",
@@ -27,7 +34,14 @@
   "engines": {
     "node": ">=22"
   },
-  "keywords": ["reddit", "mcp", "playwright", "human-in-the-loop"],
+  "keywords": [
+    "reddit",
+    "mcp",
+    "playwright",
+    "ai-agents",
+    "browser-automation",
+    "human-in-the-loop"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Bl0ck154/reddit-agent-publisher.git"
