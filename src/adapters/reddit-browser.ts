@@ -217,12 +217,17 @@ export class RedditBrowserAdapter implements Adapter {
   }
 
   async diagnose(live: boolean): Promise<Record<string, unknown>> {
-    const chromeExists = fs.existsSync(this.config.chromePath);
-    if (!live) return { adapter: "reddit", chrome_exists: chromeExists, display: this.config.display };
+    if (!live) return { adapter: "reddit", mode: "external_cdp", cdp_endpoint: this.config.cdpUrl };
     const page = await this.chrome.page("default");
     try {
       await page.goto("https://www.reddit.com/", { waitUntil: "domcontentloaded", timeout: 30_000 });
-      return { adapter: "reddit", chrome_exists: chromeExists, reddit_reachable: this.isRedditPage(page.url()), authenticated: await this.cookieAuthenticated(page) && !await this.gate(page) };
+      return {
+        adapter: "reddit",
+        mode: "external_cdp",
+        cdp_endpoint: this.config.cdpUrl,
+        reddit_reachable: this.isRedditPage(page.url()),
+        authenticated: await this.cookieAuthenticated(page) && !await this.gate(page)
+      };
     } finally {
       this.chrome.release("default");
     }
