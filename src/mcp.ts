@@ -8,7 +8,7 @@ import { PublisherService } from "./service.js";
 const config = loadConfig();
 ensureState(config);
 const publisher = new PublisherService(config);
-const server = new McpServer({ name: "reddit-agent-publisher", version: "0.1.0" });
+const server = new McpServer({ name: "reddit-agent-publisher", version: "0.1.1" });
 
 function result(value: any) {
   return {
