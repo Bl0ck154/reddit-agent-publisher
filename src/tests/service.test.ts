@@ -50,15 +50,9 @@ function makeConfig(options: { ttl?: number; cooldown?: number } = {}): Config {
   return {
     stateDir: fs.mkdtempSync(path.join(os.tmpdir(), "reddit-agent-publisher-test-")),
     cdpUrl: "http://127.0.0.1:9222",
-    socketPath: "/tmp/reddit-agent-publisher-test.sock",
-    chromePath: "/usr/bin/false",
-    display: ":0",
-    browserIdleSeconds: 30,
     approvalTtlSeconds: options.ttl ?? 900,
     mutationCooldownSeconds: options.cooldown ?? 0,
     redditMetadataCacheSeconds: 900,
-    actionsHost: "127.0.0.1",
-    actionsPort: 8791,
     defaultAccount: "default"
   };
 }
