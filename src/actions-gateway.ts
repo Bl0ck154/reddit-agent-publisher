@@ -27,6 +27,20 @@ const RedditPost = z.object({ subreddit:z.string().min(2).max(21),title:z.string
 const RedditComment = z.object({ url:z.string().url(),body:z.string().min(1).max(40_000),account:Account.optional() }).strict();
 const RedditDelete = z.object({ url:z.string().url(),account:Account.optional() }).strict();
 const PublishBody = z.object({ preview_digest:z.string().min(16).max(256) }).strict();
+const ThreadQuery = z.object({
+  url:z.string().url(), account:Account,
+  limit:z.coerce.number().int().min(1).max(100).default(50),
+  depth:z.coerce.number().int().min(1).max(10).default(6),
+  context:z.coerce.number().int().min(0).max(10).default(8),
+});
+const ActivityQuery = z.object({
+  account:Account, kind:z.enum(["all","posts","comments"]).default("all"),
+  limit:z.coerce.number().int().min(1).max(100).default(25),
+});
+const InboxQuery = z.object({
+  account:Account, unread_only:z.enum(["true","false"]).default("true").transform(value=>value==="true"),
+  limit:z.coerce.number().int().min(1).max(100).default(25),
+});
 
 type PreviewKind = "reddit-post"|"reddit-comment"|"reddit-edit"|"reddit-delete";
 
@@ -93,8 +107,8 @@ function errorMessage(env: ResultEnvelope): string {
   if (["AUTH_REQUIRED","TAKEOVER_REQUIRED"].includes(code)) return "The saved browser session needs a manual sign-in or verification on the server before this can continue.";
   if (code === "APPROVAL_STALE") return "That preview expired or changed. Create a fresh preview before publishing.";
   if (code === "ACCOUNT_BUSY") return "The publishing browser is busy with another write. Try this action again shortly.";
-  if (code === "RATE_LIMITED") return "The publisher is cooling down after a recent write. Try again shortly.";
-  if (code === "SITE_CHANGED") return "The site UI changed and the publisher stopped safely instead of guessing. The browser adapter needs inspection.";
+  if (code === "RATE_LIMITED") return "The publisher is cooling down or Reddit temporarily rate-limited the request. Try again shortly.";
+  if (code === "SITE_CHANGED") return "The Reddit/site response changed and the publisher stopped safely instead of guessing. The adapter needs inspection.";
   return env.error?.message ?? "The publisher could not complete this operation.";
 }
 
@@ -128,6 +142,10 @@ function publishOutput(env: ResultEnvelope): Record<string, unknown> {
     published_url:result.url, already_published:already, warnings:env.warnings ?? [] };
 }
 
+function readOutput(env: ResultEnvelope, message: string): Record<string, unknown> {
+  return env.ok ? { ok:true, message, data:env.result } : { ok:false, message:errorMessage(env), error_code:env.error?.code, details:env.error?.details };
+}
+
 async function local(method: string, params: Record<string, unknown> = {}): Promise<ResultEnvelope> {
   return rpc(config.socketPath, method, { ...params, actor:"gpt-action" });
 }
@@ -156,13 +174,28 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const adapter = url.searchParams.get("adapter") ?? undefined; const account = url.searchParams.get("account") ?? "default";
     if (adapter && adapter !== "reddit") { json(res,400,{ok:false,message:"Invalid adapter."}); return; }
     const env = await local("status", { adapter,account });
-    json(res,200,env.ok ? {ok:true,message:"Publisher session status checked.",data:env.result} : {ok:false,message:errorMessage(env),error_code:env.error?.code}); return;
+    json(res,200,readOutput(env,"Publisher session status checked.")); return;
   }
   if (req.method === "GET" && (url.pathname === "/v1/reddit/rules" || url.pathname === "/v1/reddit/flairs")) {
     const subreddit = url.searchParams.get("subreddit") ?? ""; const account = url.searchParams.get("account") ?? "default";
     if (!/^[A-Za-z0-9_]{2,21}$/.test(subreddit)) { json(res,400,{ok:false,message:"Invalid subreddit name."}); return; }
     const env = await local(url.pathname.endsWith("rules") ? "reddit_rules" : "reddit_flairs", {subreddit,account});
-    json(res,200,env.ok ? {ok:true,message:url.pathname.endsWith("rules")?"Subreddit rules loaded.":"Available Reddit flairs loaded.",data:env.result} : {ok:false,message:errorMessage(env),error_code:env.error?.code}); return;
+    json(res,200,readOutput(env,url.pathname.endsWith("rules")?"Subreddit rules loaded.":"Available Reddit flairs loaded.")); return;
+  }
+  if (req.method === "GET" && url.pathname === "/v1/reddit/thread") {
+    const q = ThreadQuery.parse(Object.fromEntries(url.searchParams));
+    const env = await local("reddit_thread", q);
+    json(res,200,readOutput(env,"Reddit thread context loaded.")); return;
+  }
+  if (req.method === "GET" && url.pathname === "/v1/reddit/activity") {
+    const q = ActivityQuery.parse(Object.fromEntries(url.searchParams));
+    const env = await local("reddit_activity", q);
+    json(res,200,readOutput(env,"Recent Reddit activity loaded.")); return;
+  }
+  if (req.method === "GET" && url.pathname === "/v1/reddit/inbox") {
+    const q = InboxQuery.parse(Object.fromEntries(url.searchParams));
+    const env = await local("reddit_inbox", q);
+    json(res,200,readOutput(env,"Reddit inbox loaded.")); return;
   }
 
   if (req.method === "POST") {
