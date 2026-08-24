@@ -1,0 +1,34 @@
+#!/bin/sh
+set -eu
+
+ACCOUNT=${1:?missing account instance}
+case "$ACCOUNT" in *[!A-Za-z0-9_-]*|'') echo "invalid account" >&2; exit 2;; esac
+
+STATE=${PUBLISHER_STATE_DIR:-"$HOME/.local/share/reddit-agent-publisher"}
+PROFILE="$STATE/profiles/$ACCOUNT"
+mkdir -p "$PROFILE"
+chmod 0700 "$PROFILE"
+
+if [ -n "${PUBLISHER_CHROME:-}" ]; then
+  CHROME=$PUBLISHER_CHROME
+else
+  CHROME=""
+  for candidate in google-chrome google-chrome-stable chromium chromium-browser; do
+    if command -v "$candidate" >/dev/null 2>&1; then CHROME=$(command -v "$candidate"); break; fi
+  done
+  if [ -z "$CHROME" ] && [ -x /opt/google/chrome/google-chrome ]; then CHROME=/opt/google/chrome/google-chrome; fi
+fi
+[ -n "$CHROME" ] || { echo "Chrome/Chromium not found; set PUBLISHER_CHROME" >&2; exit 1; }
+
+SUM=$(printf '%s' "$ACCOUNT" | cksum | awk '{print $1}')
+PORT=$((9300 + SUM % 500))
+printf '%s\n' "$PORT" > "$PROFILE/PublisherDebugPort"
+chmod 0600 "$PROFILE/PublisherDebugPort"
+
+exec "$CHROME" \
+  --user-data-dir="$PROFILE" \
+  --remote-debugging-address=127.0.0.1 \
+  --remote-debugging-port="$PORT" \
+  --no-first-run \
+  --no-default-browser-check \
+  about:blank

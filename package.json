@@ -1,22 +1,31 @@
 {
   "name": "reddit-agent-publisher",
-  "version": "0.1.1",
-  "description": "User-controlled Reddit workflow tooling with MCP and browser sessions.",
+  "version": "0.2.0",
+  "description": "Let AI agents publish to Reddit through real browser sessions, with live previews and explicit human approval.",
   "type": "module",
   "bin": {
     "pubctl": "dist/cli.js",
-    "publisher-mcp": "dist/mcp.js"
+    "publisher-mcp": "dist/mcp.js",
+    "publisherd": "dist/daemon.js",
+    "publisher-actions": "dist/actions-gateway.js",
+    "publisher-browser-start": "bin/start-browser"
   },
   "files": [
     "dist",
+    "bin",
+    "actions",
+    "docs",
     "README.md",
     "LICENSE",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "SECURITY.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "node --test dist/tests/*.test.js",
+    "test": "node --test --enable-source-maps dist/tests/*.test.js",
     "check": "npm run build && npm test",
+    "start": "node dist/daemon.js",
+    "start:actions": "node dist/actions-gateway.js",
     "prepack": "npm run check"
   },
   "dependencies": {
@@ -36,9 +45,10 @@
   },
   "keywords": [
     "reddit",
+    "ai-agents",
+    "chatgpt",
     "mcp",
     "playwright",
-    "ai-agents",
     "browser-automation",
     "human-in-the-loop"
   ],

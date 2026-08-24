@@ -21,5 +21,6 @@ export interface Adapter {
   login(account: string): Promise<Record<string, unknown>>;
   status(account: string): Promise<Record<string, unknown>>;
   diagnose(live: boolean): Promise<Record<string, unknown>>;
+  /** Optional hook for browser adapters that must keep an exact live preview alive after approval. */
   approved?(draft: Draft): Promise<void> | void;
 }

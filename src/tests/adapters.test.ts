@@ -1,0 +1,94 @@
+import assert from "node:assert/strict";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { canonicalRedditPublishedPostUrl, extractCommunityRulesText, formatSubredditRulesPayload, normalizeFlairOptions, RedditBrowserAdapter } from "../adapters/reddit-browser.js";
+import type { Config } from "../config.js";
+import type { Draft } from "../types.js";
+
+const stateDir=fs.mkdtempSync(path.join(os.tmpdir(),"reddit-adapter-"));
+const config:Config={
+  stateDir,
+  socketPath:path.join(stateDir,"sock"),
+  chromePath:"/missing",
+  display:":98",
+  approvalTtlSeconds:900,
+  mutationCooldownSeconds:15,
+  browserIdleSeconds:90,
+  redditMetadataCacheSeconds:900,
+  actionsHost:"127.0.0.1",
+  actionsPort:8791,
+  defaultAccount:"owner-main",
+  browserServicePrefix:"reddit-agent-publisher-browser",
+  cdpUrl:"http://127.0.0.1:9222",
+};
+const base={id:"1",adapter:"reddit",account:"default",state:"PREPARED",revision:1,digest:"x",created_at:"x",updated_at:"x"} as const;
+
+test("Reddit browser adapter validates without API credentials",async()=>{
+  const a=new RedditBrowserAdapter(config);
+  await a.validate({...base,action:"create_post",target:{subreddit:"example"},content:{title:"Owner post",body:"Draft"}} as Draft);
+});
+
+test("Reddit browser adapter rejects arbitrary local image paths",async()=>{
+  const outside=path.join(config.stateDir,"outside.png");
+  fs.writeFileSync(outside,Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]));
+  const a=new RedditBrowserAdapter(config);
+  await assert.rejects(()=>a.validate({...base,action:"create_post",target:{subreddit:"example"},content:{title:"Owner image post",media_files:[{path:outside,mime_type:"image/png"}]}} as Draft),/protected publisher media directory/);
+});
+
+test("Reddit browser adapter accepts prepared CLI images from the protected local-files directory",async()=>{
+  const root=path.join(config.stateDir,"artifacts","local-files");
+  fs.mkdirSync(root,{recursive:true});
+  const file=path.join(root,"image.png");
+  const bytes=Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]);
+  fs.writeFileSync(file,bytes);
+  const a=new RedditBrowserAdapter(config);
+  await a.validate({...base,action:"create_post",target:{subreddit:"example"},content:{title:"Owner image post",media_files:[{path:file,name:"image.png",mime_type:"image/png",size:bytes.length,sha256:`sha256:${crypto.createHash("sha256").update(bytes).digest("hex")}`}]}} as Draft);
+});
+
+test("Reddit browser adapter rejects look-alike URLs",async()=>{
+  const a=new RedditBrowserAdapter(config);
+  await assert.rejects(()=>a.validate({...base,action:"create_comment",target:{url:"https://reddit.com.evil.invalid/r/x"},content:{body:"x"}} as Draft),/canonical HTTPS Reddit/);
+});
+
+test("Reddit browser adapter accepts canonical comment permalink",async()=>{
+  const a=new RedditBrowserAdapter(config);
+  await a.validate({...base,action:"create_comment",target:{url:"https://www.reddit.com/r/example/comments/abc123/title/def456/"},content:{body:"Owner reply"}} as Draft);
+});
+
+test("Reddit browser adapter rejects arbitrary Reddit paths for mutations",async()=>{
+  const a=new RedditBrowserAdapter(config);
+  await assert.rejects(()=>a.validate({...base,action:"delete",target:{url:"https://www.reddit.com/settings/account"},content:{}} as Draft),/canonical post\/comment permalink/);
+});
+
+test("Reddit rules fallback extracts the dedicated mod-page content",()=>{
+  const text=extractCommunityRulesText("reddit\nSearch\nCommunity Rules\nNAME\n1\nBe Civil.\nCREATED\nNov 12, 2023");
+  assert.equal(text,"Community Rules\nNAME\n1\nBe Civil.\nCREATED\nNov 12, 2023");
+  assert.equal(extractCommunityRulesText("Create post\nNo rules here"),undefined);
+});
+
+test("Reddit rules API payload is formatted without depending on mod UI",()=>{
+  assert.deepEqual(formatSubredditRulesPayload({rules:[]}),{text:"Community Rules\nNo subreddit-specific rules are listed.",rules:[]});
+  const formatted=formatSubredditRulesPayload({rules:[
+    {short_name:"No Spam",description:"Do not spam.",kind:"all",priority:1},
+    {short_name:"Posts only",description:"Stay on topic.",kind:"link",priority:0},
+  ]});
+  assert.equal(formatted?.text,"Community Rules\n\n1. Posts only\nApplies to: Posts\nStay on topic.\n\n2. No Spam\nApplies to: Posts & comments\nDo not spam.");
+  assert.deepEqual(formatted?.rules.map(rule=>rule.short_name),["Posts only","No Spam"]);
+  assert.equal(formatSubredditRulesPayload({site_rules:[]}),undefined);
+});
+
+test("Reddit flair options are normalized and deduplicated",()=>{
+  assert.deepEqual(normalizeFlairOptions([" Question ","News\n","question","","Support"]),["Question","News","Support"]);
+});
+
+test("Reddit publish redirect is converted to a stable post permalink",()=>{
+  assert.deepEqual(canonicalRedditPublishedPostUrl("https://www.reddit.com/r/Telegram/?created=t3_1vvgd46&createdPostType=text&is_eligible_for_nudge_to_crosspost_modal=true","Telegram"),{url:"https://www.reddit.com/r/Telegram/comments/1vvgd46/",fullname:"t3_1vvgd46"});
+});
+
+test("Reddit direct post URL is canonicalized and tracking query is removed",()=>{
+  assert.deepEqual(canonicalRedditPublishedPostUrl("https://www.reddit.com/r/Telegram/comments/1vvgd46/some_title/?utm_source=chatgpt.com","Telegram"),{url:"https://www.reddit.com/r/Telegram/comments/1vvgd46/",fullname:"t3_1vvgd46"});
+  assert.equal(canonicalRedditPublishedPostUrl("https://example.com/?created=t3_1vvgd46","Telegram"),undefined);
+});

@@ -1,130 +1,163 @@
-export function buildActionsSchema(baseUrl: string): Record<string, unknown> {
-  const error = {
-    type: "object",
-    properties: {
-      ok: { type: "boolean" },
-      message: { type: "string" },
-      error: { type: "string" }
-    }
+export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
+  const server = baseUrl.replace(/\/$/, "");
+  const account = { type: "string", default: "default", description: "Publisher account id. Usually leave as default." };
+  const okResponse = {
+    description: "Action result",
+    content: { "application/json": { schema: { $ref: "#/components/schemas/ActionResult" } } },
   };
-
   const previewResponse = {
-    type: "object",
-    properties: {
-      ok: { type: "boolean" },
-      draft_id: { type: "string" },
-      preview_digest: { type: "string" },
-      preview: { type: "object", additionalProperties: true },
-      message: { type: "string" }
-    }
+    description: "A live preview was prepared. Nothing has been published yet.",
+    content: { "application/json": { schema: { $ref: "#/components/schemas/PreviewResult" } } },
   };
-
-  const protectedOperation = (operationId: string, summary: string, consequential: boolean, requestBody?: Record<string, unknown>, parameters?: unknown[]) => ({
-    operationId,
-    summary,
-    security: [{ bearerAuth: [] }],
-    "x-openai-isConsequential": consequential,
-    ...(parameters ? { parameters } : {}),
-    ...(requestBody ? { requestBody: { required: true, content: { "application/json": { schema: requestBody } } } } : {}),
-    responses: {
-      "200": { description: "Success", content: { "application/json": { schema: consequential ? error : previewResponse } } },
-      "400": { description: "Invalid request", content: { "application/json": { schema: error } } },
-      "401": { description: "Unauthorized", content: { "application/json": { schema: error } } }
-    }
-  });
+  const jsonBody = (schema: Record<string, unknown>) => ({ required: true, content: { "application/json": { schema } } });
 
   return {
     openapi: "3.1.0",
+    jsonSchemaDialect: "https://json-schema.org/draft/2020-12/schema",
     info: {
       title: "Reddit Agent Publisher Actions",
-      version: "0.1.0",
-      description: "Restricted owner-controlled Reddit publishing actions. Preview operations do not submit content; publishing is a separate consequential action."
+      version: "0.2.0",
+      description: "Owner-only GPT Actions gateway for Reddit Agent Publisher. Preview operations never submit content. publishPublication is the only endpoint that performs the external write and must be confirmed by the user.",
     },
-    servers: [{ url: baseUrl.replace(/\/$/, "") }],
-    components: {
-      securitySchemes: {
-        bearerAuth: { type: "http", scheme: "bearer" }
-      }
-    },
+    servers: [{ url: server }],
+    security: [{ bearerAuth: [] }],
     paths: {
       "/v1/status": {
-        get: protectedOperation("getPublisherStatus", "Read Reddit publisher status", false, undefined, [
-          { name: "account", in: "query", required: false, schema: { type: "string", default: "default" } }
-        ])
+        get: {
+          operationId: "getPublisherStatus",
+          "x-openai-isConsequential": false,
+          summary: "Check Reddit browser session status",
+          description: "Read-only. Use when a publish operation reports that a manual login is required.",
+          parameters: [
+            { name: "adapter", in: "query", required: false, schema: { type: "string", enum: ["reddit"] } },
+            { name: "account", in: "query", required: false, schema: account },
+          ],
+          responses: { "200": okResponse },
+        },
       },
       "/v1/reddit/rules": {
-        get: protectedOperation("getRedditRules", "Read subreddit rules", false, undefined, [
-          { name: "subreddit", in: "query", required: true, schema: { type: "string" } },
-          { name: "account", in: "query", required: false, schema: { type: "string", default: "default" } }
-        ])
+        get: {
+          operationId: "getRedditRules",
+          "x-openai-isConsequential": false,
+          summary: "Read subreddit rules",
+          description: "Read-only. Results are cached briefly by the publisher.",
+          parameters: [
+            { name: "subreddit", in: "query", required: true, schema: { type: "string" } },
+            { name: "account", in: "query", required: false, schema: account },
+          ],
+          responses: { "200": okResponse },
+        },
       },
       "/v1/reddit/flairs": {
-        get: protectedOperation("getRedditFlairs", "Read subreddit post flairs", false, undefined, [
-          { name: "subreddit", in: "query", required: true, schema: { type: "string" } },
-          { name: "account", in: "query", required: false, schema: { type: "string", default: "default" } }
-        ])
+        get: {
+          operationId: "getRedditFlairs",
+          "x-openai-isConsequential": false,
+          summary: "Read available Reddit post flairs",
+          description: "Read-only. Results are cached briefly by the publisher.",
+          parameters: [
+            { name: "subreddit", in: "query", required: true, schema: { type: "string" } },
+            { name: "account", in: "query", required: false, schema: account },
+          ],
+          responses: { "200": okResponse },
+        },
       },
       "/v1/reddit/posts/preview": {
-        post: protectedOperation("previewRedditPost", "Prepare a Reddit post preview", false, {
-          type: "object",
-          required: ["subreddit", "title"],
-          properties: {
-            subreddit: { type: "string" },
-            title: { type: "string" },
-            body: { type: "string" },
-            url: { type: "string", format: "uri" },
-            flair: { type: "string" },
-            account: { type: "string", default: "default" }
-          },
-          additionalProperties: false
-        })
+        post: {
+          operationId: "previewRedditPost",
+          "x-openai-isConsequential": false,
+          summary: "Prepare a Reddit post preview",
+          description: "Fills the exact Reddit form in the authenticated browser but does not click Post. Show the returned preview naturally to the user and wait for explicit confirmation before publishPublication.",
+          requestBody: jsonBody({
+            type: "object", required: ["subreddit", "title"], additionalProperties: false,
+            properties: {
+              subreddit: { type: "string", description: "Subreddit name without r/." },
+              title: { type: "string" }, body: { type: "string" }, url: { type: "string", format: "uri" },
+              flair: { type: "string", description: "Visible flair label, if required." }, account,
+              openaiFileIdRefs: {
+                type: "array", minItems: 1, maxItems: 4, items: { type: "string" },
+                description: "Images uploaded or generated in the current ChatGPT conversation. Attach 1–4 image files. ChatGPT replaces these references with short-lived download objects at runtime. Do not combine with url.",
+              },
+            },
+          }),
+          responses: { "200": previewResponse },
+        },
       },
       "/v1/reddit/comments/preview": {
-        post: protectedOperation("previewRedditComment", "Prepare a Reddit comment preview", false, {
-          type: "object",
-          required: ["url", "body"],
-          properties: {
-            url: { type: "string", format: "uri" },
-            body: { type: "string" },
-            account: { type: "string", default: "default" }
-          },
-          additionalProperties: false
-        })
+        post: {
+          operationId: "previewRedditComment",
+          "x-openai-isConsequential": false,
+          summary: "Prepare a Reddit comment preview",
+          description: "Fills a comment/reply form for the exact canonical Reddit permalink but does not submit it.",
+          requestBody: jsonBody({
+            type: "object", required: ["url", "body"], additionalProperties: false,
+            properties: { url: { type: "string", format: "uri" }, body: { type: "string" }, account },
+          }),
+          responses: { "200": previewResponse },
+        },
       },
-      "/v1/reddit/edit/preview": {
-        post: protectedOperation("previewRedditEdit", "Prepare an edit preview", false, {
-          type: "object",
-          required: ["url", "body"],
-          properties: {
-            url: { type: "string", format: "uri" },
-            body: { type: "string" },
-            account: { type: "string", default: "default" }
-          },
-          additionalProperties: false
-        })
+      "/v1/reddit/edits/preview": {
+        post: {
+          operationId: "previewRedditEdit",
+          "x-openai-isConsequential": false,
+          summary: "Prepare an edit of the owner's Reddit content",
+          description: "Opens the exact owned Reddit post/comment and fills the edit form without saving it.",
+          requestBody: jsonBody({
+            type: "object", required: ["url", "body"], additionalProperties: false,
+            properties: { url: { type: "string", format: "uri" }, body: { type: "string" }, account },
+          }),
+          responses: { "200": previewResponse },
+        },
       },
-      "/v1/reddit/delete/preview": {
-        post: protectedOperation("previewRedditDelete", "Prepare a delete preview", false, {
-          type: "object",
-          required: ["url"],
-          properties: {
-            url: { type: "string", format: "uri" },
-            account: { type: "string", default: "default" }
-          },
-          additionalProperties: false
-        })
+      "/v1/reddit/deletes/preview": {
+        post: {
+          operationId: "previewRedditDelete",
+          "x-openai-isConsequential": false,
+          summary: "Prepare deletion of the owner's Reddit content",
+          description: "Resolves the exact owned Reddit target and prepares deletion without clicking the final delete confirmation.",
+          requestBody: jsonBody({
+            type: "object", required: ["url"], additionalProperties: false,
+            properties: { url: { type: "string", format: "uri" }, account },
+          }),
+          responses: { "200": previewResponse },
+        },
       },
-      "/v1/publications/publish": {
-        post: protectedOperation("publishPublication", "Publish the exact current preview", true, {
-          type: "object",
-          required: ["draft_id", "preview_digest"],
+      "/v1/publications/{draft_id}/publish": {
+        post: {
+          operationId: "publishPublication",
+          "x-openai-isConsequential": true,
+          summary: "Publish the exact previously previewed content",
+          description: "CONSEQUENTIAL: performs the external write. Call only after showing the preview to the user and receiving explicit confirmation. The preview_digest must come from the matching preview response. Safe to retry after a successful publish; the service will not publish the same draft twice.",
+          parameters: [{ name: "draft_id", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+          requestBody: jsonBody({
+            type: "object", required: ["preview_digest"], additionalProperties: false,
+            properties: { preview_digest: { type: "string", description: "Opaque digest returned by the preview action." } },
+          }),
+          responses: { "200": { description: "Published, already published, or a structured error", content: { "application/json": { schema: { $ref: "#/components/schemas/PublishResult" } } } } },
+        },
+      },
+    },
+    components: {
+      securitySchemes: { bearerAuth: { type: "http", scheme: "bearer" } },
+      schemas: {
+        ActionResult: {
+          type: "object", required: ["ok", "message"],
+          properties: { ok: { type: "boolean" }, message: { type: "string" }, data: { type: "object", additionalProperties: true }, error_code: { type: "string" } },
+        },
+        PreviewResult: {
+          type: "object", required: ["ok", "message"],
           properties: {
-            draft_id: { type: "string", format: "uuid" },
-            preview_digest: { type: "string", pattern: "^sha256:[a-f0-9]{64}$" }
+            ok: { type: "boolean" }, message: { type: "string" }, draft_id: { type: "string" }, preview_digest: { type: "string" },
+            expires_at: { type: "string" }, requires_confirmation: { type: "boolean" }, preview: { type: "object", additionalProperties: true }, error_code: { type: "string" },
           },
-          additionalProperties: false
-        })
-      }
-    }
+        },
+        PublishResult: {
+          type: "object", required: ["ok", "message"],
+          properties: {
+            ok: { type: "boolean" }, message: { type: "string" }, published_url: { type: "string" }, already_published: { type: "boolean" },
+            warnings: { type: "array", items: { type: "string" } }, error_code: { type: "string" },
+          },
+        },
+      },
+    },
   };
 }

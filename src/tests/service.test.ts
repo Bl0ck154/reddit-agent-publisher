@@ -8,6 +8,8 @@ import type { Config } from "../config.js";
 import { PublisherService } from "../service.js";
 import type { Draft } from "../types.js";
 
+process.env.NODE_ENV = "test";
+
 class FakeRedditAdapter implements Adapter {
   readonly id = "reddit";
   published = 0;
@@ -47,13 +49,21 @@ class FakeRedditAdapter implements Adapter {
 }
 
 function makeConfig(options: { ttl?: number; cooldown?: number } = {}): Config {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "reddit-agent-publisher-test-"));
   return {
-    stateDir: fs.mkdtempSync(path.join(os.tmpdir(), "reddit-agent-publisher-test-")),
+    stateDir,
+    socketPath: path.join(stateDir, "publisher.sock"),
+    chromePath: "/missing/chrome",
+    display: ":98",
     cdpUrl: "http://127.0.0.1:9222",
     approvalTtlSeconds: options.ttl ?? 900,
     mutationCooldownSeconds: options.cooldown ?? 0,
+    browserIdleSeconds: 90,
     redditMetadataCacheSeconds: 900,
-    defaultAccount: "default"
+    actionsHost: "127.0.0.1",
+    actionsPort: 8791,
+    defaultAccount: "default",
+    browserServicePrefix: "reddit-agent-publisher-browser"
   };
 }
 
@@ -86,9 +96,9 @@ async function prepareAndPreview(publisher: PublisherService, suffix = "one") {
 async function approve(publisher: PublisherService, id: string, digest: string) {
   const approved = await publisher.approve(id, digest, `APPROVE ${id}`);
   assert.equal(approved.ok, true);
-  const result = approved.result as { token: string; expires_at: string };
-  assert.ok(result.token);
-  return result.token;
+  const result = approved.result as { approval_token: string; expires_at: string };
+  assert.ok(result.approval_token);
+  return result.approval_token;
 }
 
 test("approval is bound to the exact preview digest", async () => {

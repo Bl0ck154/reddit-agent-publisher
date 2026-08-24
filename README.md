@@ -5,67 +5,64 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js 22+](https://img.shields.io/badge/Node.js-22%2B-brightgreen.svg)](package.json)
 
-**A self-hosted, human-approved Reddit publishing bridge for AI agents and MCP clients.**
+> **Let AI agents actually publish to Reddit through your real browser, while you keep the final say.**
 
-Reddit Agent Publisher connects a narrow application interface to **your own authenticated Reddit browser session**. It does not require Reddit Data API credentials: authentication stays inside Chrome while the application manages drafts, live previews, approvals, local state, and audit history.
+Reddit Agent Publisher bridges the awkward gap between **“AI wrote the post for me”** and **“AI safely published it in my account.”** ChatGPT, Codex, MCP clients, or your own tooling can prepare a real Reddit form, show an exact live preview, and only submit after explicit owner approval.
 
-The core workflow is deliberately simple:
+No Reddit Data API credentials are required. Your login stays inside a normal Chrome profile, and passwords, 2FA codes, and CAPTCHA answers never need to pass through the agent.
 
-> **prepare → preview → approve → execute**
+```text
+AI prepares content
+        ↓
+Publisher opens the exact Reddit target
+        ↓
+real browser form is filled
+        ↓
+owner sees the preview
+        ↓
+explicit confirmation
+        ↓
+publish
+```
 
 ![Publishing workflow](assets/workflow.png)
 
-Nothing is submitted during preparation or preview. An external change is only executed after approval of the exact current preview.
+## ✨ What it can do
 
-## Why this project exists
+- **Posts**: text, link, and 1–4 image posts
+- **Comments & replies**: including replies in modern Shreddit threads
+- **Edit / delete**: exact canonical post or comment targets only
+- **Subreddit rules & flairs**: read before posting without Reddit API credentials
+- **ChatGPT / Custom GPT Actions**: real preview endpoints plus a separate consequential publish action
+- **MCP**: one narrow publishing toolset for Codex and other MCP clients
+- **CLI**: the same workflow from the terminal
+- **Persistent Chrome sessions**: keep your normal Reddit login
+- **Encrypted drafts**: AES-256-GCM local storage
+- **Live preview continuity**: a long-running daemon owns the exact browser preview between preview → approval → publish
+- **Idempotent confirmed publishing**: retrying an already-published confirmed draft does not create a duplicate
+- **Fail-closed targeting**: ambiguous UI means stop, not “click whatever looks close”
 
-Generic browser agents are powerful, but they also expose a very large browser surface. Reddit Agent Publisher narrows that surface to a small publishing-oriented interface with explicit state transitions and approval checks.
+## 🚀 Current Reddit UI: live-tested
 
-Instead of giving an AI agent unrestricted browser control, the agent works through a purpose-built publisher layer that knows about Reddit posts, comments, edits, deletes, subreddit rules, flairs, previews, and approval state.
+The August 24, 2026 update significantly hardened comments and replies for the current Reddit frontend.
 
-## Features
+The publisher now waits for the exact post/comment to hydrate, scopes top-level replies to the matching comment composer, understands the current `faceplate-form` / Lexical editor flow, and binds submission to the active composer instead of searching the whole thread.
 
-| Capability | Status |
-| --- | --- |
-| Create Reddit posts | ✅ |
-| Create comments / replies | ✅ |
-| Edit own content | ✅ |
-| Delete own content | ✅ |
-| Read subreddit rules | ✅ |
-| Discover post flairs | ✅ |
-| Live browser preview | ✅ |
-| MCP server | ✅ |
-| CLI | ✅ |
-| Local SQLite state | ✅ |
-| Hash-chained audit events | ✅ |
-| OpenAPI 3.1 contract | ✅ |
-| Hosted HTTP / GPT Actions gateway | Not bundled in the public edition |
+This was verified with a **live authenticated Reddit preview**, not only mocks: the correct post was found, the correct comment composer opened, text was filled, and no external write happened before confirmation.
 
-## Architecture
+Current suite: **30/30 tests passing**, including an in-place upgrade test from the public `v0.1.x` database format.
 
-```mermaid
-flowchart LR
-    A[AI agent / MCP client / CLI] --> B[PublisherService]
-    B --> C[(SQLite state)]
-    B --> D[Reddit browser adapter]
-    D --> E[Playwright + local CDP]
-    E --> F[User-owned Chrome]
-    F --> G[Reddit]
+See [CHANGELOG.md](CHANGELOG.md).
 
-    B --> H[Live preview]
-    H --> I{Owner approval}
-    I -->|approved| J[Execute exact preview]
-    I -->|not approved| K[No external change]
-```
+## 🧠 Why a browser backend?
 
-## Requirements
+Reddit Agent Publisher intentionally works through the **real Reddit website in a real authenticated browser session**. That makes it useful for a small self-hosted owner tool even when practical Reddit Data API write access is unavailable.
 
-- Node.js 22+
-- npm
-- Chrome, Chromium, or Chrome for Testing
-- a Reddit account
+The important part is that this is not generic unrestricted browser automation. The service exposes a small publishing state machine with exact targets, preview digests, expiring approvals, account locks, and a final confirmation boundary.
 
 ## Quick start
+
+Requirements: Node.js 22+, npm, and Chrome/Chromium.
 
 ```bash
 git clone https://github.com/Bl0ck154/reddit-agent-publisher.git
@@ -74,35 +71,66 @@ npm ci
 npm run build
 ```
 
-The public edition connects to a **local Chrome DevTools Protocol endpoint**. Chrome is started and controlled by you; this project does not store your Reddit password or manage browser credentials.
-
-Default endpoint:
-
-```text
-http://127.0.0.1:9222
-```
-
-A typical local Chrome launch looks like this:
+Create the local encryption key once:
 
 ```bash
-google-chrome --remote-debugging-port=9222 --user-data-dir="$HOME/.reddit-agent-publisher-chrome"
+mkdir -p "$HOME/.local/share/reddit-agent-publisher"
+openssl rand 32 > "$HOME/.local/share/reddit-agent-publisher/master.key"
+chmod 600 "$HOME/.local/share/reddit-agent-publisher/master.key"
+export PUBLISHER_MASTER_KEY_FILE="$HOME/.local/share/reddit-agent-publisher/master.key"
 ```
 
-Executable names differ between operating systems and Chrome distributions. Log in to Reddit manually in that Chrome profile, then keep the browser available while the publisher is running.
-
-To use another **local** CDP port:
+### Easiest browser mode: your own local Chrome
 
 ```bash
-export PUBLISHER_CDP_URL=http://127.0.0.1:9333
+google-chrome \
+  --remote-debugging-address=127.0.0.1 \
+  --remote-debugging-port=9222 \
+  --user-data-dir="$HOME/.reddit-agent-publisher-chrome"
 ```
 
-Remote CDP hosts are intentionally rejected.
+Log in to Reddit manually in that Chrome window, then:
 
-## MCP setup
+```bash
+export PUBLISHER_CDP_URL=http://127.0.0.1:9222
+npm start
+```
 
-After building the project, point your MCP client at `dist/mcp.js`.
+In another shell, with the same environment:
 
-Example configuration:
+```bash
+node dist/cli.js status
+node dist/cli.js reddit-rules scrapingtheweb
+node dist/cli.js prepare reddit-post --subreddit test --title "Hello" --body "Preview me first"
+```
+
+The CLI, MCP server, and GPT Actions gateway all talk to the same long-running daemon, so the exact live preview survives between commands.
+
+For on-demand managed Chrome profiles and idle shutdown, see [Browser modes](docs/browser-modes.md).
+
+## ChatGPT / Custom GPT Actions
+
+`v0.2.0` includes the actual owner-only HTTP Actions gateway, not just an OpenAPI contract.
+
+Supported Actions include:
+
+- `getPublisherStatus`
+- `getRedditRules`
+- `getRedditFlairs`
+- `previewRedditPost`
+- `previewRedditComment`
+- `previewRedditEdit`
+- `previewRedditDelete`
+- `publishPublication`
+
+Image posts can receive 1–4 images directly from the current ChatGPT conversation. The gateway validates and stages those files locally before the browser preview.
+
+Setup: [ChatGPT / Custom GPT Actions](docs/gpt-actions.md)
+Recommended GPT instructions: [actions/gpt-instructions.md](actions/gpt-instructions.md)
+
+## MCP
+
+After starting `publisherd`, point your MCP client at `dist/mcp.js`:
 
 ```json
 {
@@ -115,68 +143,28 @@ Example configuration:
 }
 ```
 
-The MCP server exposes a narrow tool set around the publishing state machine, including preparation, preview, approval, execution, account status, subreddit rules, flair discovery, pending drafts, and diagnostics.
+MCP uses the same daemon, encrypted state, browser session, validation, preview, and approval rules as every other interface.
 
-## CLI
+## 🔐 Safety model
 
-The repository also includes `src/cli.ts`, compiled to `dist/cli.js`.
+- **Preview first, publish second.** Preview never submits.
+- **Exact target identity.** Comments, edits, and deletes are bound to canonical Reddit permalinks.
+- **Digest-bound approval.** Approval is tied to the current preview and draft revision.
+- **Expiring approvals.** Old previews cannot silently become new writes.
+- **One account write lock.** Concurrent mutations are rejected.
+- **Encrypted local drafts.** `v0.2.0` migrates `v0.1.x` plaintext payloads in place and clears the old plaintext field after encryption.
+- **Local browser boundary.** Portable CDP mode accepts loopback endpoints only.
+- **Manual auth challenges.** Login, 2FA, CAPTCHA, and consent stay in the owner-controlled browser.
+- **Hash-chained audit events.** Local state retains a tamper-evident operational trail.
 
-```bash
-node dist/cli.js --help
-node dist/cli.js status
-node dist/cli.js doctor
-```
+## Browser modes
 
-The CLI and MCP server use the same `PublisherService`, state database, validation rules, and approval model.
+Two modes are supported:
 
-## Approval and safety model
+1. **Portable local CDP**: you own the Chrome lifecycle; the publisher attaches to a loopback endpoint.
+2. **Managed persistent Chrome**: the publisher can start a per-account systemd user browser, pin it while a preview awaits approval, and stop it after an idle period.
 
-A few design decisions are intentional:
-
-- **Preview first.** The Reddit form is prepared before any external mutation.
-- **Digest-bound approval.** Approval is tied to the exact preview digest and revision.
-- **Expiring approval.** Old approvals cannot be reused indefinitely.
-- **Canonical targets.** Edit/delete operations are bound to canonical Reddit post/comment URLs.
-- **Local browser boundary.** The CDP endpoint must resolve to localhost.
-- **Account write lock.** Concurrent mutations for the same account are rejected.
-- **Audit trail.** Local audit events are hash-chained.
-- **Manual authentication challenges.** CAPTCHA, 2FA, consent, and account challenges stay in the user-owned browser.
-
-## Local state
-
-By default, application state is stored under:
-
-```text
-~/.local/share/reddit-agent-publisher
-```
-
-You can override this with `PUBLISHER_STATE_DIR`.
-
-The state directory contains the SQLite database, preview artifacts, and temporary files. Runtime state, databases, logs, and environment files are excluded by `.gitignore`.
-
-## OpenAPI / GPT Actions
-
-`src/actions-schema.ts` contains a Reddit-only OpenAPI 3.1 contract for integrations that want an HTTP layer.
-
-The public repository currently **does not bundle a hosted HTTP gateway**. The schema is included as an integration boundary, while the working public interfaces are the CLI and MCP server.
-
-## Project structure
-
-```text
-src/
-├── adapters/
-│   ├── base.ts
-│   └── reddit-browser.ts
-├── tests/
-├── actions-schema.ts
-├── cli.ts
-├── config.ts
-├── db.ts
-├── external-chrome.ts
-├── mcp.ts
-├── service.ts
-└── types.ts
-```
+Details: [docs/browser-modes.md](docs/browser-modes.md).
 
 ## Development
 
@@ -185,21 +173,22 @@ npm ci
 npm run check
 ```
 
-`npm run check` builds the TypeScript project and runs the test suite. The same check runs in GitHub Actions on pushes and pull requests.
+The same build + test check runs in GitHub Actions.
 
-## Release history
+## Documentation
 
-See [CHANGELOG.md](CHANGELOG.md) for notable changes. Published versions are available under [GitHub Releases](https://github.com/Bl0ck154/reddit-agent-publisher/releases).
+- [Changelog](CHANGELOG.md)
+- [Custom GPT Actions](docs/gpt-actions.md)
+- [Browser modes](docs/browser-modes.md)
+- [Reddit writing style guide](actions/reddit-writing-style.md)
+- [Security policy](SECURITY.md)
+- [Contributing](CONTRIBUTING.md)
 
 ## Limitations
 
-Reddit Agent Publisher works against the website UI, so Reddit frontend changes can require selector maintenance. It is not intended to hide automation from Reddit or bypass account challenges. Authentication, CAPTCHA, 2FA, consent, and similar user-verification steps remain manual.
+This project automates the Reddit website UI, so major Reddit frontend changes can require adapter maintenance. The adapter is designed to stop safely on ambiguous or changed UI rather than guess. It does not bypass account challenges or attempt to hide automation from Reddit.
 
 This project is not affiliated with or endorsed by Reddit.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md). Security-related reports should follow [SECURITY.md](SECURITY.md).
 
 ## License
 

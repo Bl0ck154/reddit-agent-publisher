@@ -1,22 +1,16 @@
 import { z } from "zod";
 
-export const AdapterId = z.literal("reddit");
+export const AdapterId = z.enum(["reddit"]);
 export type AdapterId = z.infer<typeof AdapterId>;
 
-export const Action = z.enum(["create_post", "create_comment", "edit", "delete"]);
+export const Action = z.enum([
+  "create_post", "create_comment", "edit", "delete",
+]);
 export type Action = z.infer<typeof Action>;
 
 export const DraftState = z.enum([
-  "PREPARED",
-  "PREVIEWED",
-  "APPROVED",
-  "PUBLISHING",
-  "PUBLISHED",
-  "NEEDS_USER",
-  "FAILED_RETRYABLE",
-  "FAILED_FINAL",
-  "CANCELLED",
-  "EXPIRED"
+  "PREPARED", "PREVIEWED", "APPROVED", "PUBLISHING", "PUBLISHED",
+  "NEEDS_USER", "FAILED_RETRYABLE", "FAILED_FINAL", "CANCELLED", "EXPIRED",
 ]);
 export type DraftState = z.infer<typeof DraftState>;
 
@@ -26,7 +20,7 @@ export const PrepareInput = z.object({
   action: Action,
   target: z.record(z.unknown()),
   content: z.record(z.unknown()).default({}),
-  owner_command: z.literal(true)
+  owner_command: z.literal(true),
 });
 export type PrepareInput = z.infer<typeof PrepareInput>;
 
@@ -69,6 +63,6 @@ export function envelope(partial: Partial<ResultEnvelope>): ResultEnvelope {
     side_effect: { performed: false },
     warnings: [],
     next_actions: [],
-    ...partial
+    ...partial,
   };
 }
