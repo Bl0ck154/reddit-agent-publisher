@@ -2,9 +2,23 @@
 import fs from "node:fs";
 import http from "node:http";
 import { ensureState, loadConfig } from "./config.js";
+import { ExternalChrome } from "./external-chrome.js";
+import { RedditReader } from "./reddit-read.js";
 import { PublisherService } from "./service.js";
+import { envelope, type ResultEnvelope } from "./types.js";
 
 const config = loadConfig(); ensureState(config); const service = new PublisherService(config);
+const redditReader = new RedditReader(new ExternalChrome(config, "reddit"));
+
+async function redditRead(work: () => Promise<unknown>): Promise<ResultEnvelope> {
+  try {
+    return envelope({ adapter:"reddit", result:await work() });
+  } catch (error: any) {
+    const message = String(error?.message ?? error);
+    const code = message.match(/^([A-Z][A-Z0-9_]+):/)?.[1] ?? "INTERNAL_ERROR";
+    return envelope({ ok:false, adapter:"reddit", error:{ code, message } });
+  }
+}
 
 async function dispatch(method: string, p: any) {
   switch (method) {
@@ -18,6 +32,9 @@ async function dispatch(method: string, p: any) {
     case "pending": return service.pending();
     case "reddit_rules": return service.rules(p.account ?? "default", p.subreddit);
     case "reddit_flairs": return service.flairs(p.account ?? "default", p.subreddit);
+    case "reddit_thread": return redditRead(() => redditReader.thread(p.account ?? "default", p.url, p.limit ?? 50, p.depth ?? 6, p.context ?? 8));
+    case "reddit_activity": return redditRead(() => redditReader.activity(p.account ?? "default", p.limit ?? 25, p.kind ?? "all"));
+    case "reddit_inbox": return redditRead(() => redditReader.inbox(p.account ?? "default", p.unread_only ?? true, p.limit ?? 25));
     case "diagnose": return service.diagnose(Boolean(p.live));
     case "artifact": return service.artifact(p.path);
     default: throw new Error(`Unknown RPC method: ${method}`);
