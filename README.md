@@ -5,13 +5,15 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js 22+](https://img.shields.io/badge/Node.js-22%2B-brightgreen.svg)](package.json)
 
-> **Let AI agents actually publish to Reddit through your real browser, while you keep the final say.**
+> **Let AI agents understand and publish to Reddit through your real browser, while you keep the final say.**
 
-Reddit Agent Publisher bridges the awkward gap between **“AI wrote the post for me”** and **“AI safely published it in my account.”** ChatGPT, Codex, MCP clients, or your own tooling can prepare a real Reddit form, show an exact live preview, and only submit after explicit owner approval.
+Reddit Agent Publisher bridges the awkward gap between **“AI wrote the post for me”** and **“AI safely handled it in my account.”** ChatGPT, Codex, MCP clients, or your own tooling can read the relevant Reddit context, prepare a real Reddit form, show an exact live preview, and only submit after explicit owner approval.
 
 No Reddit Data API credentials are required. Your login stays inside a normal Chrome profile, and passwords, 2FA codes, and CAPTCHA answers never need to pass through the agent.
 
 ```text
+AI reads the relevant Reddit context
+        ↓
 AI prepares content
         ↓
 Publisher opens the exact Reddit target
@@ -29,28 +31,55 @@ publish
 
 ## ✨ What it can do
 
+- **Thread context**: read an exact Reddit post, nested comments, and a targeted comment from its permalink
+- **Your recent activity**: find your latest Reddit posts/comments without manually copying links
+- **Inbox & replies**: read unread or recent Reddit replies/messages before drafting a response
 - **Posts**: text, link, and 1–4 image posts
 - **Comments & replies**: including replies in modern Shreddit threads
 - **Edit / delete**: exact canonical post or comment targets only
 - **Subreddit rules & flairs**: read before posting without Reddit API credentials
-- **ChatGPT / Custom GPT Actions**: real preview endpoints plus a separate consequential publish action
-- **MCP**: one narrow publishing toolset for Codex and other MCP clients
-- **CLI**: the same workflow from the terminal
+- **ChatGPT / Custom GPT Actions**: read context, prepare real previews, then use a separate consequential publish action
+- **Typed MCP tools**: explicit post/comment/reply/edit/delete preparation plus read-only thread/activity/inbox tools
+- **CLI**: the same context + publishing workflow from the terminal
 - **Persistent Chrome sessions**: keep your normal Reddit login
 - **Encrypted drafts**: AES-256-GCM local storage
 - **Live preview continuity**: a long-running daemon owns the exact browser preview between preview → approval → publish
 - **Idempotent confirmed publishing**: retrying an already-published confirmed draft does not create a duplicate
 - **Fail-closed targeting**: ambiguous UI means stop, not “click whatever looks close”
 
+## 🤖 Agent context workflow
+
+An agent no longer needs you to manually paste every permalink just to understand what you mean.
+
+For example, a request like **“look at my latest post, see who replied, and prepare an answer to the newest comment”** can be resolved as:
+
+```text
+recent own activity
+        ↓
+exact thread + comments
+        ↓
+inbox/reply context when useful
+        ↓
+context-aware reply draft
+        ↓
+live preview
+        ↓
+owner confirmation
+        ↓
+publish
+```
+
+The read phase is strictly non-consequential. It uses the same authenticated Chrome session as publishing but does not mutate Reddit.
+
 ## 🚀 Current Reddit UI: live-tested
 
 The August 24, 2026 update significantly hardened comments and replies for the current Reddit frontend.
 
-The publisher now waits for the exact post/comment to hydrate, scopes top-level replies to the matching comment composer, understands the current `faceplate-form` / Lexical editor flow, and binds submission to the active composer instead of searching the whole thread.
+The publisher waits for the exact post/comment to hydrate, scopes top-level replies to the matching comment composer, understands the current `faceplate-form` / Lexical editor flow, and binds submission to the active composer instead of searching the whole thread.
 
 This was verified with a **live authenticated Reddit preview**, not only mocks: the correct post was found, the correct comment composer opened, text was filled, and no external write happened before confirmation.
 
-Current suite: **30/30 tests passing**, including an in-place upgrade test from the public `v0.1.x` database format.
+The context reader is separately regression-tested for canonical Reddit targets, nested comment trees, own activity, and inbox normalization.
 
 See [CHANGELOG.md](CHANGELOG.md).
 
@@ -58,7 +87,7 @@ See [CHANGELOG.md](CHANGELOG.md).
 
 Reddit Agent Publisher intentionally works through the **real Reddit website in a real authenticated browser session**. That makes it useful for a small self-hosted owner tool even when practical Reddit Data API write access is unavailable.
 
-The important part is that this is not generic unrestricted browser automation. The service exposes a small publishing state machine with exact targets, preview digests, expiring approvals, account locks, and a final confirmation boundary.
+The browser session now serves two narrow purposes: read the Reddit context the agent needs, and prepare exact owner-approved writes. It is not exposed as generic unrestricted browser automation.
 
 ## Quick start
 
@@ -100,28 +129,36 @@ In another shell, with the same environment:
 
 ```bash
 node dist/cli.js status
-node dist/cli.js reddit-rules scrapingtheweb
+node dist/cli.js reddit-activity --limit 10
+node dist/cli.js reddit-thread 'https://www.reddit.com/r/example/comments/abc123/example/'
+node dist/cli.js reddit-inbox
 node dist/cli.js prepare reddit-post --subreddit test --title "Hello" --body "Preview me first"
 ```
 
-The CLI, MCP server, and GPT Actions gateway all talk to the same long-running daemon, so the exact live preview survives between commands.
+The CLI, MCP server, and GPT Actions gateway all talk to the same long-running daemon, so the same authenticated browser/session state is reused across context reads and live previews.
 
 For on-demand managed Chrome profiles and idle shutdown, see [Browser modes](docs/browser-modes.md).
 
 ## ChatGPT / Custom GPT Actions
 
-`v0.2.0` includes the actual owner-only HTTP Actions gateway, not just an OpenAPI contract.
+The owner-only HTTP Actions gateway exposes both read-only context and the preview/publish workflow.
 
-Supported Actions include:
+Read-only Actions:
 
 - `getPublisherStatus`
 - `getRedditRules`
 - `getRedditFlairs`
+- `getRedditThread`
+- `getMyRedditActivity`
+- `getRedditInbox`
+
+Write workflow:
+
 - `previewRedditPost`
 - `previewRedditComment`
 - `previewRedditEdit`
 - `previewRedditDelete`
-- `publishPublication`
+- `publishPublication` — the only consequential Action
 
 Image posts can receive 1–4 images directly from the current ChatGPT conversation. The gateway validates and stages those files locally before the browser preview.
 
@@ -143,10 +180,22 @@ After starting `publisherd`, point your MCP client at `dist/mcp.js`:
 }
 ```
 
-MCP uses the same daemon, encrypted state, browser session, validation, preview, and approval rules as every other interface.
+Useful Reddit-specific MCP tools include:
+
+- `reddit_thread_get`
+- `reddit_my_activity`
+- `reddit_inbox`
+- `reddit_post_prepare`
+- `reddit_comment_prepare`
+- `reddit_reply_prepare`
+- `reddit_edit_prepare`
+- `reddit_delete_prepare`
+
+The generic `publication_prepare` tool remains for backward compatibility. MCP uses the same daemon, encrypted state, browser session, validation, preview, and approval rules as every other interface.
 
 ## 🔐 Safety model
 
+- **Reads are read-only.** Thread/activity/inbox tools never submit, edit, delete, vote, or otherwise mutate Reddit.
 - **Preview first, publish second.** Preview never submits.
 - **Exact target identity.** Comments, edits, and deletes are bound to canonical Reddit permalinks.
 - **Digest-bound approval.** Approval is tied to the current preview and draft revision.
@@ -186,7 +235,7 @@ The same build + test check runs in GitHub Actions.
 
 ## Limitations
 
-This project automates the Reddit website UI, so major Reddit frontend changes can require adapter maintenance. The adapter is designed to stop safely on ambiguous or changed UI rather than guess. It does not bypass account challenges or attempt to hide automation from Reddit.
+This project automates the Reddit website UI and authenticated Reddit web endpoints, so major Reddit frontend or response changes can require adapter maintenance. The publisher is designed to stop safely on ambiguous or changed behavior rather than guess. It does not bypass account challenges or attempt to hide automation from Reddit.
 
 This project is not affiliated with or endorsed by Reddit.
 

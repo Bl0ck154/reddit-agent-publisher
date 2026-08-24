@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- read-only `reddit_thread_get` / `getRedditThread` context loading for exact Reddit post and comment permalinks, including nested comments and the targeted comment
+- read-only `reddit_my_activity` / `getMyRedditActivity` for locating the authenticated owner's recent posts and comments
+- read-only `reddit_inbox` / `getRedditInbox` for unread or recent replies/messages
+- typed MCP preparation tools for Reddit posts, top-level comments, replies, edits, and deletes while retaining the generic preparation tool for compatibility
+- CLI commands for thread context, recent activity, inbox, and explicit reply preparation
+
+### Changed
+
+- Custom GPT instructions can resolve indirect targets such as “my last post” or “the newest reply” before preparing an exact write
+- GPT Actions exposes context reads as explicitly non-consequential operations using the same authenticated browser session
+
+### Security
+
+- context reads accept canonical Reddit targets and are isolated from the preview/approval/publish mutation state machine
+- regression coverage rejects non-Reddit and ambiguous thread targets
+
 ## 0.2.0 - 2026-08-24
 
 Major Reddit-only sync from the private multi-platform publisher, keeping the public repository portable and self-hostable.

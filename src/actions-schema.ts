@@ -17,7 +17,7 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
     info: {
       title: "Reddit Agent Publisher Actions",
       version: "0.2.0",
-      description: "Owner-only GPT Actions gateway for Reddit Agent Publisher. Preview operations never submit content. publishPublication is the only endpoint that performs the external write and must be confirmed by the user.",
+      description: "Owner-only GPT Actions gateway for Reddit Agent Publisher. Reddit context operations are read-only. Preview operations never submit content. publishPublication is the only endpoint that performs the external write and must be confirmed by the user.",
     },
     servers: [{ url: server }],
     security: [{ bearerAuth: [] }],
@@ -27,7 +27,7 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
           operationId: "getPublisherStatus",
           "x-openai-isConsequential": false,
           summary: "Check Reddit browser session status",
-          description: "Read-only. Use when a publish operation reports that a manual login is required.",
+          description: "Read-only. Use when a publish or Reddit context operation reports that a manual login is required.",
           parameters: [
             { name: "adapter", in: "query", required: false, schema: { type: "string", enum: ["reddit"] } },
             { name: "account", in: "query", required: false, schema: account },
@@ -57,6 +57,50 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
           parameters: [
             { name: "subreddit", in: "query", required: true, schema: { type: "string" } },
             { name: "account", in: "query", required: false, schema: account },
+          ],
+          responses: { "200": okResponse },
+        },
+      },
+      "/v1/reddit/thread": {
+        get: {
+          operationId: "getRedditThread",
+          "x-openai-isConsequential": false,
+          summary: "Read a Reddit post and its comment context",
+          description: "Read-only. Use an exact Reddit post or comment permalink. Returns the post, nested comments, and the targeted comment when the URL points to one.",
+          parameters: [
+            { name: "url", in: "query", required: true, schema: { type: "string", format: "uri" } },
+            { name: "account", in: "query", required: false, schema: account },
+            { name: "limit", in: "query", required: false, schema: { type: "integer", minimum: 1, maximum: 100, default: 50 } },
+            { name: "depth", in: "query", required: false, schema: { type: "integer", minimum: 1, maximum: 10, default: 6 } },
+            { name: "context", in: "query", required: false, schema: { type: "integer", minimum: 0, maximum: 10, default: 8 } },
+          ],
+          responses: { "200": okResponse },
+        },
+      },
+      "/v1/reddit/activity": {
+        get: {
+          operationId: "getMyRedditActivity",
+          "x-openai-isConsequential": false,
+          summary: "Read the owner's recent Reddit posts and comments",
+          description: "Read-only. Useful for locating a recent owner post/comment before reading its thread or preparing a reply.",
+          parameters: [
+            { name: "account", in: "query", required: false, schema: account },
+            { name: "kind", in: "query", required: false, schema: { type: "string", enum: ["all", "posts", "comments"], default: "all" } },
+            { name: "limit", in: "query", required: false, schema: { type: "integer", minimum: 1, maximum: 100, default: 25 } },
+          ],
+          responses: { "200": okResponse },
+        },
+      },
+      "/v1/reddit/inbox": {
+        get: {
+          operationId: "getRedditInbox",
+          "x-openai-isConsequential": false,
+          summary: "Read the owner's Reddit inbox and replies",
+          description: "Read-only. Defaults to unread replies/messages so the agent can find new responses before preparing a reply.",
+          parameters: [
+            { name: "account", in: "query", required: false, schema: account },
+            { name: "unread_only", in: "query", required: false, schema: { type: "boolean", default: true } },
+            { name: "limit", in: "query", required: false, schema: { type: "integer", minimum: 1, maximum: 100, default: 25 } },
           ],
           responses: { "200": okResponse },
         },

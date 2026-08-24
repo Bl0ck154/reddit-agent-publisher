@@ -52,6 +52,13 @@ prep.command("reddit-comment")
   .option("--account <id>", "account", "default")
   .action(o => call("prepare", { input:{adapter:"reddit",account:o.account,action:"create_comment",target:{url:o.target},content:{body:text(o.body,o.bodyFile)},owner_command:true} }));
 
+prep.command("reddit-reply")
+  .requiredOption("--target <exact-comment-permalink>")
+  .option("--body <text>")
+  .option("--body-file <path>")
+  .option("--account <id>", "account", "default")
+  .action(o => call("prepare", { input:{adapter:"reddit",account:o.account,action:"create_comment",target:{url:o.target},content:{body:text(o.body,o.bodyFile)},owner_command:true} }));
+
 program.command("edit")
   .requiredOption("--target <exact-reddit-permalink>")
   .option("--body <text>")
@@ -75,5 +82,14 @@ program.command("status").option("--account <id>", "account", "default").action(
 program.command("pending").action(() => call("pending"));
 program.command("reddit-rules <subreddit>").option("--account <id>", "account", "default").action((subreddit,o) => call("reddit_rules", {subreddit,account:o.account}));
 program.command("reddit-flairs <subreddit>").option("--account <id>", "account", "default").action((subreddit,o) => call("reddit_flairs", {subreddit,account:o.account}));
+program.command("reddit-thread <url>")
+  .option("--account <id>", "account", "default").option("--limit <n>", "comment limit", "50").option("--depth <n>", "comment depth", "6").option("--context <n>", "parent context for comment permalinks", "8")
+  .action((url,o) => call("reddit_thread", {url,account:o.account,limit:Number(o.limit),depth:Number(o.depth),context:Number(o.context)}));
+program.command("reddit-activity")
+  .option("--account <id>", "account", "default").option("--kind <kind>", "all, posts, or comments", "all").option("--limit <n>", "item limit", "25")
+  .action(o => call("reddit_activity", {account:o.account,kind:o.kind,limit:Number(o.limit)}));
+program.command("reddit-inbox")
+  .option("--account <id>", "account", "default").option("--all", "include read messages/replies", false).option("--limit <n>", "item limit", "25")
+  .action(o => call("reddit_inbox", {account:o.account,unread_only:!o.all,limit:Number(o.limit)}));
 program.command("doctor").option("--live", "read-only live checks").action(o => call("diagnose", { live:o.live }));
 program.parseAsync().catch(e => { console.error(e.message); process.exit(1); });

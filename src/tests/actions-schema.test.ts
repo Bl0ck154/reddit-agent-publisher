@@ -13,13 +13,16 @@ test("GPT Actions schema uses the deployed HTTPS origin and Bearer auth",()=>{
   assert.equal(files.items.type,"string");
 });
 
-test("preview actions are non-consequential but real publish always requires confirmation",()=>{
+test("read and preview actions are non-consequential but real publish always requires confirmation",()=>{
   const schema=buildActionsOpenApi("https://publisher.example.com") as any;
   const operations=Object.values(schema.paths).flatMap((path:any)=>Object.values(path));
   assert.equal(operations.every((operation:any)=>typeof operation["x-openai-isConsequential"]==="boolean"),true);
   assert.equal(schema.paths["/v1/status"].get["x-openai-isConsequential"],false);
   assert.equal(schema.paths["/v1/reddit/rules"].get["x-openai-isConsequential"],false);
   assert.equal(schema.paths["/v1/reddit/flairs"].get["x-openai-isConsequential"],false);
+  assert.equal(schema.paths["/v1/reddit/thread"].get["x-openai-isConsequential"],false);
+  assert.equal(schema.paths["/v1/reddit/activity"].get["x-openai-isConsequential"],false);
+  assert.equal(schema.paths["/v1/reddit/inbox"].get["x-openai-isConsequential"],false);
   assert.equal(schema.paths["/v1/reddit/posts/preview"].post["x-openai-isConsequential"],false);
   assert.equal(schema.paths["/v1/publications/{draft_id}/publish"].post["x-openai-isConsequential"],true);
   assert.equal(Object.keys(schema.paths).some((path:string)=>path.includes("google")),false);
