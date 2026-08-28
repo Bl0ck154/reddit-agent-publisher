@@ -6,6 +6,7 @@ import {
   normalizeInboxPayload,
   normalizeThreadPayload,
 } from "../reddit-read.js";
+import { redditUsernameFromProfileHref } from "../reddit-identity.js";
 
 test("canonicalRedditThreadTarget accepts post and comment permalinks", () => {
   assert.deepEqual(canonicalRedditThreadTarget("https://www.reddit.com/r/test/comments/abc123/example/"), {
@@ -70,4 +71,10 @@ test("normalizeThreadPayload exposes deterministic top/newest/oldest top-level c
   assert.equal((result.oldest_comment as Record<string, unknown>).id, "root1");
   assert.equal((result.newest_comment as Record<string, unknown>).id, "root2");
   assert.equal((result.top_comment as Record<string, unknown>).permalink, "https://www.reddit.com/r/test/comments/abc123/title/root2/");
+});
+
+test("Reddit username parser accepts only exact profile links", () => {
+  assert.equal(redditUsernameFromProfileHref("/user/EfficiencyGood4815/"), "EfficiencyGood4815");
+  assert.equal(redditUsernameFromProfileHref("/user/stadt_wien/comments/abc123/title/"), undefined);
+  assert.equal(redditUsernameFromProfileHref("https://www.reddit.com/user/example/"), undefined);
 });

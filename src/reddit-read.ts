@@ -1,5 +1,6 @@
 import type { Page } from "playwright-core";
 import { ExternalChrome } from "./external-chrome.js";
+import { detectRedditUsername } from "./reddit-identity.js";
 
 type JsonObject = Record<string, unknown>;
 type ActivityKind = "all" | "posts" | "comments";
@@ -327,10 +328,17 @@ export class RedditReader {
   }
 
   private async username(page: Page): Promise<string> {
-    const payload = await this.fetchJson(page, "/api/me.json?raw_json=1");
-    const name = string(object(payload)?.name);
-    if (!name) throw new Error("AUTH_REQUIRED: Reddit account identity is unavailable; complete manual login and retry");
-    return name;
+    try {
+      const payload = await this.fetchJson(page, "/api/me.json?raw_json=1");
+      const name = string(object(payload)?.name);
+      if (name) return name;
+    } catch {
+      // Reddit's legacy identity endpoint is not reliable on every current
+      // web session. Fall back to the authenticated user menu below.
+    }
+    const detected = await detectRedditUsername(page);
+    if (detected) return detected;
+    throw new Error("AUTH_REQUIRED: Reddit account identity is unavailable; complete manual login and retry");
   }
 
   private async fetchJson(page: Page, endpoint: string): Promise<unknown> {

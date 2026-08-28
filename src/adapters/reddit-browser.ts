@@ -6,6 +6,7 @@ import { ExternalChrome } from "../external-chrome.js";
 import type { Draft } from "../types.js";
 import type { Adapter, PreviewData, PublishData } from "./base.js";
 import { PublisherError } from "../errors.js";
+import { detectRedditUsername } from "../reddit-identity.js";
 
 type Role = "button" | "menuitem" | "link" | "combobox" | "tab";
 type MediaFile = { path: string; name: string; mime_type: string; size: number; sha256: string };
@@ -899,8 +900,7 @@ export class RedditBrowserAdapter implements Adapter {
   }
 
   private async detectUsername(page: Page): Promise<string | undefined> {
-    const text = await page.locator("body").innerText().catch(() => "");
-    return text.match(/u\/([A-Za-z0-9_-]{3,20})/)?.[1];
+    return detectRedditUsername(page);
   }
 
   private async cookieAuthenticated(page: Page): Promise<boolean> {
