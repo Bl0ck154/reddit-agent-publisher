@@ -550,6 +550,7 @@ export class RedditBrowserAdapter implements Adapter {
     if (initialTag !== "textarea") {
       const page = "page" in scope ? scope.page() : scope;
       let toggle: Locator | undefined;
+      let formattingExpanded = false;
       for (let attempt = 0; attempt < 20 && !toggle; attempt += 1) {
         toggle = await this.findAny(scope, ["button", "link"], ui.markdown);
         if (!toggle) {
@@ -563,6 +564,15 @@ export class RedditBrowserAdapter implements Adapter {
           }
           if (matches.length === 1) toggle = matches[0];
           if (matches.length > 1) throw new Error(`AMBIGUOUS_TARGET: expected one Reddit Markdown toggle, found ${matches.length}`);
+        }
+        if (!toggle && !formattingExpanded) {
+          const expandFormatting = await this.findAny(scope, ["button"], [/^show formatting options$/i, /^formatting options$/i]);
+          if (expandFormatting) {
+            await expandFormatting.click();
+            formattingExpanded = true;
+            await page.waitForTimeout(250);
+            continue;
+          }
         }
         if (!toggle && attempt < 19) await page.waitForTimeout(500);
       }
