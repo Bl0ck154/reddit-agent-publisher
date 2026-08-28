@@ -331,7 +331,7 @@ export class RedditBrowserAdapter implements Adapter {
       } else {
         if (!s.submit || !await s.submit.isVisible()) throw new Error("APPROVAL_STALE: exact submit control disappeared");
         await s.submit.click();
-        if (d.action === "create_post") await s.page.waitForURL(url => url.toString() !== before, { timeout: 20_000 }).catch(() => { throw new Error("PUBLISH_RESULT_AMBIGUOUS: Reddit did not navigate after Post"); });
+        if (d.action === "create_post") await this.waitPostCommitted(s, before);
         else if (s.bodyField) await this.waitComposerCommitted(s.bodyField);
       }
       const errors = await s.page.getByRole("alert").allTextContents().catch(() => []);
@@ -803,6 +803,37 @@ export class RedditBrowserAdapter implements Adapter {
   }
 
   private async fieldValue(x: Locator): Promise<string> { return await x.inputValue().catch(async () => await x.innerText()); }
+  private async waitPostCommitted(s: PreviewSession, before: string): Promise<void> {
+    const deadline = Date.now() + 20_000;
+    let resetSince = 0;
+    while (Date.now() < deadline) {
+      if (s.page.url() !== before) return;
+
+      const alerts = await s.page.getByRole("alert").allTextContents().catch(() => []);
+      const alertText = alerts.map(x => x.trim()).filter(Boolean).join(" | ");
+      if (alertText) throw new Error(`PUBLISH_RESULT_AMBIGUOUS: Reddit alert after Post: ${alertText.slice(0, 300)}`);
+
+      // New Reddit can complete a submit in-place without changing the URL.
+      // In that flow the composer is reset/unmounted after the server accepts
+      // the post. Require that state to remain stable briefly so a transient
+      // React re-render is not mistaken for a successful publication.
+      const count = s.titleField ? await s.titleField.count().catch(() => 0) : 0;
+      let reset = count === 0;
+      if (!reset && s.titleField) {
+        const value = await s.titleField.inputValue().catch(() => undefined);
+        reset = value === "" && Boolean(s.title);
+      }
+      if (reset) {
+        if (!resetSince) resetSince = Date.now();
+        if (Date.now() - resetSince >= 500) return;
+      } else {
+        resetSince = 0;
+      }
+      await s.page.waitForTimeout(200);
+    }
+    throw new Error("PUBLISH_RESULT_AMBIGUOUS: Reddit did not expose a stable success signal after Post");
+  }
+
   private async waitComposerCommitted(x: Locator): Promise<void> {
     for (let i = 0; i < 20; i += 1) {
       if (!await x.isVisible().catch(() => false) || await this.fieldValue(x) === "") return;

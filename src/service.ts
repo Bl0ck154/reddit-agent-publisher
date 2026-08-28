@@ -106,9 +106,15 @@ export class PublisherService {
     const lock = d.account;
     if (this.locks.has(lock)) return this.fail(new Error("ACCOUNT_BUSY: another mutation is in progress"), id);
     const waitMs = this.config.mutationCooldownSeconds * 1000 - (Date.now() - (this.lastMutation.get(lock) ?? 0));
-    if (waitMs > 0) return this.fail(new Error(`RATE_LIMITED: retry after ${Math.ceil(waitMs / 1000)} seconds`), id);
     this.locks.add(lock);
     try {
+      // The cooldown is an internal pacing guard, not an error the caller should
+      // have to recover from. Keep the account lock while waiting so a batch of
+      // owner-approved writes remains serialized, then continue the same publish.
+      if (waitMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, waitMs));
+        if (Date.parse(a.expires_at) <= Date.now()) return this.fail(new Error("APPROVAL_REQUIRED: approval expired while waiting for publisher cooldown"), id);
+      }
       this.store.db.transaction(()=>{
         const consumed=this.store.db.prepare("UPDATE approvals SET status='consumed', consumed_at=? WHERE id=? AND status='active'").run(new Date().toISOString(),a.id);
         const claimed=this.store.db.prepare("UPDATE drafts SET state='PUBLISHING', updated_at=? WHERE id=? AND state='APPROVED'").run(new Date().toISOString(),id);

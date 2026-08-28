@@ -145,8 +145,8 @@ test("an approval token can execute a draft only once", async () => {
   assert.equal(adapter.published, 1);
 });
 
-test("account cooldown prevents back-to-back mutations", async () => {
-  const { publisher, adapter } = makePublisher({ cooldown: 60 });
+test("account cooldown is absorbed internally for back-to-back mutations", async () => {
+  const { publisher, adapter } = makePublisher({ cooldown: 0.05 });
   const firstDraft = await prepareAndPreview(publisher, "first");
   const secondDraft = await prepareAndPreview(publisher, "second");
   const firstToken = await approve(publisher, firstDraft.id, firstDraft.digest);
@@ -156,7 +156,7 @@ test("account cooldown prevents back-to-back mutations", async () => {
   assert.equal(first.ok, true);
 
   const second = await publisher.publish(secondDraft.id, secondToken);
-  assert.equal(second.ok, false);
-  assert.equal(second.error?.code, "RATE_LIMITED");
-  assert.equal(adapter.published, 1);
+  assert.equal(second.ok, true);
+  assert.equal(second.error?.code, undefined);
+  assert.equal(adapter.published, 2);
 });
