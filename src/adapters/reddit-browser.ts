@@ -811,11 +811,15 @@ export class RedditBrowserAdapter implements Adapter {
   }
 
   private async needUniqueAny(scope: Page | Locator, roles: Role[], names: RegExp[]): Promise<Locator> {
-    for (const role of roles) for (const name of names) {
-      const x = scope.getByRole(role as any, { name });
-      const n = await this.visibleCount(x);
-      if (n === 1) return x.filter({ visible: true }).first();
-      if (n > 1) throw new Error(`AMBIGUOUS_TARGET: expected one semantic ${role}, found ${n}`);
+    const page = "page" in scope ? scope.page() : scope;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      for (const role of roles) for (const name of names) {
+        const x = scope.getByRole(role as any, { name });
+        const n = await this.visibleCount(x);
+        if (n === 1) return x.filter({ visible: true }).first();
+        if (n > 1) throw new Error(`AMBIGUOUS_TARGET: expected one semantic ${role}, found ${n}`);
+      }
+      if (attempt < 19) await page.waitForTimeout(250);
     }
     throw new Error("SITE_CHANGED: expected semantic control not found");
   }
