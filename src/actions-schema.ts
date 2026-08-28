@@ -17,7 +17,7 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
     info: {
       title: "Reddit Agent Publisher Actions",
       version: "0.2.0",
-      description: "Owner-only GPT Actions gateway for Reddit Agent Publisher. Reddit context operations are read-only. Preview operations never submit content. publishPublication is the only endpoint that performs the external write and must be confirmed by the user.",
+      description: "Owner-only GPT Actions gateway for Reddit Agent Publisher. Reddit context operations are read-only. Preview operations never submit content. Finalized Reddit posts/comments can use one-step consequential publish actions; legacy publishPublication publishes an existing exact preview.",
     },
     servers: [{ url: server }],
     security: [{ bearerAuth: [] }],
@@ -105,12 +105,46 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
           responses: { "200": okResponse },
         },
       },
+      "/v1/reddit/posts/publish": {
+        post: {
+          operationId: "publishRedditPost",
+          "x-openai-isConsequential": true,
+          summary: "Publish a finalized Reddit post in one step",
+          description: "CONSEQUENTIAL. Use when the user has already explicitly asked to publish/post the finalized content. The server internally prepares and verifies a live Reddit preview, then publishes that exact content. Do not ask for an additional chat confirmation before calling this action; ChatGPT's action-approval UI handles any required approval.",
+          requestBody: jsonBody({
+            type: "object", required: ["subreddit", "title"], additionalProperties: false,
+            properties: {
+              subreddit: { type: "string", description: "Subreddit name without r/." },
+              title: { type: "string" }, body: { type: "string" }, url: { type: "string", format: "uri" },
+              flair: { type: "string", description: "Visible flair label, if required." }, account,
+              openaiFileIdRefs: {
+                type: "array", minItems: 1, maxItems: 4, items: { type: "string" },
+                description: "Images uploaded or generated in the current ChatGPT conversation. Attach 1–4 image files. ChatGPT replaces these references with short-lived download objects at runtime. Do not combine with url.",
+              },
+            },
+          }),
+          responses: { "200": { description: "Published or a structured error", content: { "application/json": { schema: { $ref: "#/components/schemas/PublishResult" } } } } },
+        },
+      },
+      "/v1/reddit/comments/publish": {
+        post: {
+          operationId: "publishRedditComment",
+          "x-openai-isConsequential": true,
+          summary: "Publish a finalized Reddit comment in one step",
+          description: "CONSEQUENTIAL. Use when the user has already explicitly asked to post the finalized comment/reply to the exact Reddit permalink. The server internally prepares and verifies a live preview before submitting. Do not ask for an additional chat confirmation before calling this action.",
+          requestBody: jsonBody({
+            type: "object", required: ["url", "body"], additionalProperties: false,
+            properties: { url: { type: "string", format: "uri" }, body: { type: "string" }, account },
+          }),
+          responses: { "200": { description: "Published or a structured error", content: { "application/json": { schema: { $ref: "#/components/schemas/PublishResult" } } } } },
+        },
+      },
       "/v1/reddit/posts/preview": {
         post: {
           operationId: "previewRedditPost",
           "x-openai-isConsequential": false,
           summary: "Prepare a Reddit post preview",
-          description: "Fills the exact Reddit form in the authenticated browser but does not click Post. Show the returned preview naturally to the user and wait for explicit confirmation before publishPublication.",
+          description: "Fills the exact Reddit form in the authenticated browser but does not click Post. Use this when the user explicitly wants to inspect/review a preview before publishing, not as a mandatory extra confirmation step.",
           requestBody: jsonBody({
             type: "object", required: ["subreddit", "title"], additionalProperties: false,
             properties: {
@@ -170,7 +204,7 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
           operationId: "publishPublication",
           "x-openai-isConsequential": true,
           summary: "Publish the exact previously previewed content",
-          description: "CONSEQUENTIAL: performs the external write. Call only after showing the preview to the user and receiving explicit confirmation. The preview_digest must come from the matching preview response. Safe to retry after a successful publish; the service will not publish the same draft twice.",
+          description: "CONSEQUENTIAL: publishes an existing live preview. Use this legacy two-step endpoint when a preview was intentionally requested or already exists. If the user has already explicitly asked to publish finalized Reddit content, prefer the one-step publishRedditPost/publishRedditComment action instead of asking for another chat confirmation. Safe to retry after a successful publish; the service will not publish the same draft twice.",
           parameters: [{ name: "draft_id", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
           requestBody: jsonBody({
             type: "object", required: ["preview_digest"], additionalProperties: false,
@@ -191,7 +225,7 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
           type: "object", required: ["ok", "message"],
           properties: {
             ok: { type: "boolean" }, message: { type: "string" }, draft_id: { type: "string" }, preview_digest: { type: "string" },
-            expires_at: { type: "string" }, requires_confirmation: { type: "boolean" }, preview: { type: "object", additionalProperties: true }, error_code: { type: "string" },
+            expires_at: { type: "string" }, preview: { type: "object", additionalProperties: true }, error_code: { type: "string" },
           },
         },
         PublishResult: {

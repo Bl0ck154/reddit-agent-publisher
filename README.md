@@ -14,15 +14,13 @@ No Reddit Data API credentials are required. Your login stays inside a normal Ch
 ```text
 AI reads the relevant Reddit context
         ↓
-AI prepares content
+AI prepares finalized content
         ↓
-Publisher opens the exact Reddit target
+one consequential publish Action
         ↓
-real browser form is filled
+platform approval when required
         ↓
-owner sees the preview
-        ↓
-explicit confirmation
+Publisher opens and verifies the exact live Reddit form
         ↓
 publish
 ```
@@ -154,11 +152,13 @@ Read-only Actions:
 
 Write workflow:
 
+- `publishRedditPost` — one-step consequential publish for finalized posts
+- `publishRedditComment` — one-step consequential publish for finalized comments/replies
 - `previewRedditPost`
 - `previewRedditComment`
 - `previewRedditEdit`
 - `previewRedditDelete`
-- `publishPublication` — the only consequential Action
+- `publishPublication` — legacy consequential publish for an exact existing preview
 
 Image posts can receive 1–4 images directly from the current ChatGPT conversation. The gateway validates and stages those files locally before the browser preview.
 

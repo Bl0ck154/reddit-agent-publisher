@@ -14,19 +14,17 @@ getRedditThread
 context-aware draft
 ```
 
-External writes stay separate:
+For finalized posts/comments, use the one-step consequential write path:
 
 ```text
-previewRedditPost / previewRedditComment / previewRedditEdit / previewRedditDelete
+publishRedditPost / publishRedditComment
         ↓
-show the exact preview to the owner
+platform action approval when required
         ↓
-explicit confirmation
-        ↓
-publishPublication
+server performs live preview verification and publishes the exact content
 ```
 
-Reddit context, status, rules, flairs, and preview endpoints are marked non-consequential. Context Actions only read through the same authenticated browser session and never mutate Reddit. Preview endpoints never click Reddit's final Post/Comment/Save/Delete action. `publishPublication` is consequential and accepts only the exact still-valid `draft_id + preview_digest` from a matching preview.
+Use `previewRedditPost` / `previewRedditComment` only when the owner explicitly wants to inspect the live preview first. Preview endpoints never click Reddit's final Post/Comment/Save/Delete action. The legacy consequential `publishPublication` endpoint remains available to publish an exact still-valid `draft_id + preview_digest` from such a preview.
 
 ## Start the daemon
 
@@ -88,7 +86,9 @@ Preview-only, no external write:
 
 External write:
 
-- `publishPublication`
+- `publishRedditPost` — one-step consequential publish for finalized posts; internally performs live preview verification first.
+- `publishRedditComment` — one-step consequential publish for finalized comments/replies; internally performs live preview verification first.
+- `publishPublication` — legacy two-step consequential publish for an exact existing preview.
 
 ### Reddit context
 
@@ -99,7 +99,7 @@ Typical flow:
 1. `getMyRedditActivity` locates a recent owner post/comment when no permalink was provided.
 2. `getRedditInbox` finds unread replies/messages when the owner asks who responded.
 3. `getRedditThread` loads the exact post/comment and nested comment context before drafting a response.
-4. A separate preview Action prepares a reply; publishing still requires explicit confirmation.
+4. If the owner then says to post the finalized reply, call `publishRedditComment` directly. Use a separate preview only when the owner asks to inspect it before publishing.
 
 `getRedditThread` accepts a canonical Reddit post or comment permalink. When the target is a comment, the response includes `target_comment` in addition to the surrounding nested comment tree.
 

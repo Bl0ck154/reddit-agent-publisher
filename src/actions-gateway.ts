@@ -131,7 +131,7 @@ function previewOutput(env: ResultEnvelope, kind: PreviewKind): Record<string, u
     "reddit-delete":"The Reddit deletion target is verified and ready. Nothing has been deleted yet.",
   };
   return { ok:true, message:labels[kind], draft_id:env.draft_id, preview_digest:preview?.digest,
-    expires_at:preview?.expires_at, requires_confirmation:true, preview:preview?.summary };
+    expires_at:preview?.expires_at, preview:preview?.summary };
 }
 
 function publishOutput(env: ResultEnvelope): Record<string, unknown> {
@@ -155,6 +155,17 @@ async function preparePreview(input: Record<string, unknown>, kind: PreviewKind)
   if (!prepared.ok || !prepared.draft_id) return { ok:false, message:errorMessage(prepared), error_code:prepared.error?.code, details:prepared.error?.details };
   const preview = await local("preview", { draft_id:prepared.draft_id });
   return previewOutput(preview, kind);
+}
+
+async function prepareAndPublish(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const prepared = await local("prepare", { input:{ ...input, owner_command:true } });
+  if (!prepared.ok || !prepared.draft_id) return { ok:false, message:errorMessage(prepared), error_code:prepared.error?.code, details:prepared.error?.details };
+  const preview = await local("preview", { draft_id:prepared.draft_id });
+  if (!preview.ok || !preview.preview) return { ok:false, message:errorMessage(preview), error_code:preview.error?.code, details:preview.error?.details };
+  const previewDigest = (preview.preview as any)?.digest;
+  if (!previewDigest) return { ok:false, message:"The publisher could not bind the live preview to this write. Nothing was published.", error_code:"PREVIEW_DIGEST_MISSING" };
+  const published = await local("action_publish_confirmed", { draft_id:prepared.draft_id, preview_digest:previewDigest });
+  return publishOutput(published);
 }
 
 async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -200,6 +211,14 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
 
   if (req.method === "POST") {
     const raw = await readJson(req);
+    if (url.pathname === "/v1/reddit/posts/publish") {
+      const b=RedditPost.parse(raw);
+      const media_files=b.openaiFileIdRefs?.length ? await prepareGptActionImages(b.openaiFileIdRefs,config.stateDir) : undefined;
+      json(res,200,await prepareAndPublish({adapter:"reddit",account:b.account??"default",action:"create_post",target:{subreddit:b.subreddit},content:{title:b.title,body:b.body??"",url:b.url,flair:b.flair,media_files}})); return;
+    }
+    if (url.pathname === "/v1/reddit/comments/publish") {
+      const b=RedditComment.parse(raw); json(res,200,await prepareAndPublish({adapter:"reddit",account:b.account??"default",action:"create_comment",target:{url:b.url},content:{body:b.body}})); return;
+    }
     if (url.pathname === "/v1/reddit/posts/preview") {
       const b=RedditPost.parse(raw);
       const media_files=b.openaiFileIdRefs?.length ? await prepareGptActionImages(b.openaiFileIdRefs,config.stateDir) : undefined;
