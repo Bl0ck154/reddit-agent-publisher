@@ -1,6 +1,7 @@
 export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
   const server = baseUrl.replace(/\/$/, "");
   const account = { type: "string", default: "default", description: "Publisher account id. Usually leave as default." };
+  const bodyFormat = { type: "string", enum: ["plain", "markdown"], default: "plain", description: "Use markdown when Reddit formatting such as **bold**, *italic*, lists, quotes, links or code should be rendered. Plain inserts literal text without switching editor mode." };
   const okResponse = {
     description: "Action result",
     content: { "application/json": { schema: { $ref: "#/components/schemas/ActionResult" } } },
@@ -66,7 +67,7 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
           operationId: "getRedditThread",
           "x-openai-isConsequential": false,
           summary: "Read a Reddit post and its comment context",
-          description: "Read-only. Use an exact Reddit post or comment permalink. Returns the post, nested comments, and the targeted comment when the URL points to one.",
+          description: "Read-only. Use an exact Reddit post or comment permalink. Returns the post, nested comments, the targeted comment when applicable, plus deterministic top_comment/newest_comment/oldest_comment shortcuts for top-level comments. top_comment means the highest Reddit score among returned top-level comments.",
           parameters: [
             { name: "url", in: "query", required: true, schema: { type: "string", format: "uri" } },
             { name: "account", in: "query", required: false, schema: account },
@@ -115,7 +116,7 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
             type: "object", required: ["subreddit", "title"], additionalProperties: false,
             properties: {
               subreddit: { type: "string", description: "Subreddit name without r/." },
-              title: { type: "string" }, body: { type: "string" }, url: { type: "string", format: "uri" },
+              title: { type: "string" }, body: { type: "string" }, body_format: bodyFormat, url: { type: "string", format: "uri" },
               flair: { type: "string", description: "Visible flair label, if required." }, account,
               openaiFileIdRefs: {
                 type: "array", minItems: 1, maxItems: 4, items: { type: "string" },
@@ -134,9 +135,22 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
           description: "CONSEQUENTIAL. Use when the user has already explicitly asked to post the finalized comment/reply to the exact Reddit permalink. The server internally prepares and verifies a live preview before submitting. Do not ask for an additional chat confirmation before calling this action.",
           requestBody: jsonBody({
             type: "object", required: ["url", "body"], additionalProperties: false,
-            properties: { url: { type: "string", format: "uri" }, body: { type: "string" }, account },
+            properties: { url: { type: "string", format: "uri" }, body: { type: "string" }, body_format: bodyFormat, account },
           }),
           responses: { "200": { description: "Published or a structured error", content: { "application/json": { schema: { $ref: "#/components/schemas/PublishResult" } } } } },
+        },
+      },
+      "/v1/reddit/edits/publish": {
+        post: {
+          operationId: "publishRedditEdit",
+          "x-openai-isConsequential": true,
+          summary: "Edit the owner's Reddit post or comment in one step",
+          description: "CONSEQUENTIAL. Use when the user has finalized replacement body text for an exact owned Reddit post/comment. Reddit post titles cannot be edited; this changes only the body/comment text. The server verifies ownership from the live Reddit UI before saving.",
+          requestBody: jsonBody({
+            type: "object", required: ["url", "body"], additionalProperties: false,
+            properties: { url: { type: "string", format: "uri" }, body: { type: "string" }, body_format: bodyFormat, account },
+          }),
+          responses: { "200": { description: "Edited or a structured error", content: { "application/json": { schema: { $ref: "#/components/schemas/PublishResult" } } } } },
         },
       },
       "/v1/reddit/posts/preview": {
@@ -149,7 +163,7 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
             type: "object", required: ["subreddit", "title"], additionalProperties: false,
             properties: {
               subreddit: { type: "string", description: "Subreddit name without r/." },
-              title: { type: "string" }, body: { type: "string" }, url: { type: "string", format: "uri" },
+              title: { type: "string" }, body: { type: "string" }, body_format: bodyFormat, url: { type: "string", format: "uri" },
               flair: { type: "string", description: "Visible flair label, if required." }, account,
               openaiFileIdRefs: {
                 type: "array", minItems: 1, maxItems: 4, items: { type: "string" },
@@ -168,7 +182,7 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
           description: "Fills a comment/reply form for the exact canonical Reddit permalink but does not submit it.",
           requestBody: jsonBody({
             type: "object", required: ["url", "body"], additionalProperties: false,
-            properties: { url: { type: "string", format: "uri" }, body: { type: "string" }, account },
+            properties: { url: { type: "string", format: "uri" }, body: { type: "string" }, body_format: bodyFormat, account },
           }),
           responses: { "200": previewResponse },
         },
@@ -181,7 +195,7 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
           description: "Opens the exact owned Reddit post/comment and fills the edit form without saving it.",
           requestBody: jsonBody({
             type: "object", required: ["url", "body"], additionalProperties: false,
-            properties: { url: { type: "string", format: "uri" }, body: { type: "string" }, account },
+            properties: { url: { type: "string", format: "uri" }, body: { type: "string" }, body_format: bodyFormat, account },
           }),
           responses: { "200": previewResponse },
         },

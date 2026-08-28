@@ -98,3 +98,9 @@ test("Reddit unavailable-page text is classified separately from UI changes",()=
   assert.equal(detectRedditTargetUnavailableText("This post was deleted by the person who originally posted it."),"deleted");
   assert.equal(detectRedditTargetUnavailableText("Normal live Reddit post"),undefined);
 });
+
+test("Reddit body_format accepts markdown and rejects unknown modes",async()=>{
+  const a=new RedditBrowserAdapter(config);
+  await a.validate({...base,adapter:"reddit",action:"create_comment",target:{url:"https://www.reddit.com/r/example/comments/abc123/title/"},content:{body:"**bold**",body_format:"markdown"}} as Draft);
+  await assert.rejects(()=>a.validate({...base,adapter:"reddit",action:"create_comment",target:{url:"https://www.reddit.com/r/example/comments/abc123/title/"},content:{body:"x",body_format:"html"}} as Draft),/body_format must be plain or markdown/);
+});

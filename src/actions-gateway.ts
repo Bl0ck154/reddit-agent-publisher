@@ -21,10 +21,11 @@ const MAX_REQUESTS = 60;
 const MAX_BODY = 64 * 1024;
 
 const Account = z.string().min(1).max(80).default("default");
+const BodyFormat = z.enum(["plain","markdown"]).default("plain");
 const GptFileRef = z.union([z.string(),z.object({name:z.string().optional(),id:z.string().optional(),mime_type:z.string().optional(),download_link:z.string().url()}).passthrough()]);
-const RedditPost = z.object({ subreddit:z.string().min(2).max(21),title:z.string().min(1).max(300),body:z.string().max(40_000).optional(),url:z.string().url().optional(),flair:z.string().max(200).optional(),openaiFileIdRefs:z.array(GptFileRef).min(1).max(4).optional(),account:Account.optional() }).strict()
+const RedditPost = z.object({ subreddit:z.string().min(2).max(21),title:z.string().min(1).max(300),body:z.string().max(40_000).optional(),body_format:BodyFormat,url:z.string().url().optional(),flair:z.string().max(200).optional(),openaiFileIdRefs:z.array(GptFileRef).min(1).max(4).optional(),account:Account.optional() }).strict()
   .refine(value=>!(value.url && value.openaiFileIdRefs?.length),{message:"A Reddit post cannot contain both a link URL and uploaded images."});
-const RedditComment = z.object({ url:z.string().url(),body:z.string().min(1).max(40_000),account:Account.optional() }).strict();
+const RedditComment = z.object({ url:z.string().url(),body:z.string().min(1).max(40_000),body_format:BodyFormat,account:Account.optional() }).strict();
 const RedditDelete = z.object({ url:z.string().url(),account:Account.optional() }).strict();
 const PublishBody = z.object({ preview_digest:z.string().min(16).max(256) }).strict();
 const ThreadQuery = z.object({
@@ -214,21 +215,24 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (url.pathname === "/v1/reddit/posts/publish") {
       const b=RedditPost.parse(raw);
       const media_files=b.openaiFileIdRefs?.length ? await prepareGptActionImages(b.openaiFileIdRefs,config.stateDir) : undefined;
-      json(res,200,await prepareAndPublish({adapter:"reddit",account:b.account??"default",action:"create_post",target:{subreddit:b.subreddit},content:{title:b.title,body:b.body??"",url:b.url,flair:b.flair,media_files}})); return;
+      json(res,200,await prepareAndPublish({adapter:"reddit",account:b.account??"default",action:"create_post",target:{subreddit:b.subreddit},content:{title:b.title,body:b.body??"",body_format:b.body_format,url:b.url,flair:b.flair,media_files}})); return;
     }
     if (url.pathname === "/v1/reddit/comments/publish") {
-      const b=RedditComment.parse(raw); json(res,200,await prepareAndPublish({adapter:"reddit",account:b.account??"default",action:"create_comment",target:{url:b.url},content:{body:b.body}})); return;
+      const b=RedditComment.parse(raw); json(res,200,await prepareAndPublish({adapter:"reddit",account:b.account??"default",action:"create_comment",target:{url:b.url},content:{body:b.body,body_format:b.body_format}})); return;
+    }
+    if (url.pathname === "/v1/reddit/edits/publish") {
+      const b=RedditComment.parse(raw); json(res,200,await prepareAndPublish({adapter:"reddit",account:b.account??"default",action:"edit",target:{url:b.url},content:{body:b.body,body_format:b.body_format}})); return;
     }
     if (url.pathname === "/v1/reddit/posts/preview") {
       const b=RedditPost.parse(raw);
       const media_files=b.openaiFileIdRefs?.length ? await prepareGptActionImages(b.openaiFileIdRefs,config.stateDir) : undefined;
-      json(res,200,await preparePreview({adapter:"reddit",account:b.account??"default",action:"create_post",target:{subreddit:b.subreddit},content:{title:b.title,body:b.body??"",url:b.url,flair:b.flair,media_files}},"reddit-post")); return;
+      json(res,200,await preparePreview({adapter:"reddit",account:b.account??"default",action:"create_post",target:{subreddit:b.subreddit},content:{title:b.title,body:b.body??"",body_format:b.body_format,url:b.url,flair:b.flair,media_files}},"reddit-post")); return;
     }
     if (url.pathname === "/v1/reddit/comments/preview") {
-      const b=RedditComment.parse(raw); json(res,200,await preparePreview({adapter:"reddit",account:b.account??"default",action:"create_comment",target:{url:b.url},content:{body:b.body}},"reddit-comment")); return;
+      const b=RedditComment.parse(raw); json(res,200,await preparePreview({adapter:"reddit",account:b.account??"default",action:"create_comment",target:{url:b.url},content:{body:b.body,body_format:b.body_format}},"reddit-comment")); return;
     }
     if (url.pathname === "/v1/reddit/edits/preview") {
-      const b=RedditComment.parse(raw); json(res,200,await preparePreview({adapter:"reddit",account:b.account??"default",action:"edit",target:{url:b.url},content:{body:b.body}},"reddit-edit")); return;
+      const b=RedditComment.parse(raw); json(res,200,await preparePreview({adapter:"reddit",account:b.account??"default",action:"edit",target:{url:b.url},content:{body:b.body,body_format:b.body_format}},"reddit-edit")); return;
     }
     if (url.pathname === "/v1/reddit/deletes/preview") {
       const b=RedditDelete.parse(raw); json(res,200,await preparePreview({adapter:"reddit",account:b.account??"default",action:"delete",target:{url:b.url},content:{}},"reddit-delete")); return;

@@ -154,6 +154,7 @@ Write workflow:
 
 - `publishRedditPost` — one-step consequential publish for finalized posts
 - `publishRedditComment` — one-step consequential publish for finalized comments/replies
+- `publishRedditEdit` — one-step consequential save for finalized edits of your Reddit post body/comment text
 - `previewRedditPost`
 - `previewRedditComment`
 - `previewRedditEdit`

@@ -158,6 +158,31 @@ function findComment(comments: JsonObject[], id: string): JsonObject | undefined
   return undefined;
 }
 
+function commentShortcut(comment: JsonObject | undefined): JsonObject | undefined {
+  if (!comment) return undefined;
+  return {
+    id: comment.id,
+    fullname: comment.fullname,
+    author: comment.author,
+    body: comment.body,
+    score: comment.score,
+    created_at: comment.created_at,
+    permalink: comment.permalink,
+    depth: comment.depth,
+  };
+}
+
+function topLevelShortcuts(comments: JsonObject[]): { top_comment?: JsonObject; newest_comment?: JsonObject; oldest_comment?: JsonObject } {
+  if (!comments.length) return {};
+  const byScore = [...comments].sort((a, b) => (number(b.score) ?? Number.NEGATIVE_INFINITY) - (number(a.score) ?? Number.NEGATIVE_INFINITY));
+  const byTime = [...comments].sort((a, b) => Date.parse(string(a.created_at) ?? "") - Date.parse(string(b.created_at) ?? ""));
+  return {
+    top_comment: commentShortcut(byScore[0]),
+    oldest_comment: commentShortcut(byTime[0]),
+    newest_comment: commentShortcut(byTime[byTime.length - 1]),
+  };
+}
+
 export function normalizeThreadPayload(payload: unknown, target: RedditThreadTarget, maxNodes = 200): JsonObject {
   const root = array(payload);
   const post = normalizePost(listingChildren(root[0])[0]);
@@ -170,6 +195,7 @@ export function normalizeThreadPayload(payload: unknown, target: RedditThreadTar
     post,
     comments,
     target_comment: target.comment_id ? findComment(comments, target.comment_id) : undefined,
+    ...topLevelShortcuts(comments),
     returned_comments: stats.returned,
     omitted_more_comments: stats.omitted_more,
     truncated: stats.truncated,

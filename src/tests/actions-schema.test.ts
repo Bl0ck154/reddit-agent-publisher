@@ -26,6 +26,10 @@ test("read and preview actions are non-consequential but real publish always req
   assert.equal(schema.paths["/v1/reddit/posts/preview"].post["x-openai-isConsequential"],false);
   assert.equal(schema.paths["/v1/reddit/posts/publish"].post["x-openai-isConsequential"],true);
   assert.equal(schema.paths["/v1/reddit/comments/publish"].post["x-openai-isConsequential"],true);
+  assert.equal(schema.paths["/v1/reddit/edits/publish"].post["x-openai-isConsequential"],true);
+  const redditBodyFormat=schema.paths["/v1/reddit/posts/publish"].post.requestBody.content["application/json"].schema.properties.body_format;
+  assert.deepEqual(redditBodyFormat.enum,["plain","markdown"]);
+  assert.equal(redditBodyFormat.default,"plain");
   assert.equal(schema.paths["/v1/publications/{draft_id}/publish"].post["x-openai-isConsequential"],true);
   assert.equal("requires_confirmation" in schema.components.schemas.PreviewResult.properties,false);
   assert.equal(Object.keys(schema.paths).some((path:string)=>path.includes("google")),false);

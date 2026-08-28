@@ -118,6 +118,7 @@ const ui = {
   delete: [/^delete$/i, /видалити/i, /удалить/i],
   more: [/more options/i, /more actions/i, /overflow/i, /додаткові дії/i, /інші параметри/i, /другие действия/i, /ещё/i],
   flair: [/add flair/i, /post flair/i, /^flair$/i, /додати flair/i, /выбрать flair/i],
+  markdown: [/^markdown editor$/i, /^markdown mode$/i, /switch to markdown/i, /use markdown/i, /редактор markdown/i, /режим markdown/i],
 };
 
 export class RedditBrowserAdapter implements Adapter {
@@ -146,6 +147,7 @@ export class RedditBrowserAdapter implements Adapter {
       this.permalink(String(d.target.url));
       if (d.action === "edit" && !String(d.content.body ?? "").trim()) throw new Error("body is required for edit");
     } else throw new Error(`Unsupported Reddit action: ${d.action}`);
+    if (d.content.body_format !== undefined) this.bodyFormat(d);
   }
 
   async login(account: string): Promise<Record<string, unknown>> {
@@ -399,7 +401,7 @@ export class RedditBrowserAdapter implements Adapter {
       if (d.content.body) {
         bodyField = await this.needUniqueTextbox(page, [/body/i, /^text$/i, /текст/i, /caption/i], titleField)
           .catch(()=>{throw new PublisherError("SUBREDDIT_FORMAT_CONSTRAINT",`The current Reddit image-post form for r/${sub} does not expose body text. The images and title were filled, but nothing was published; remove the body or add it later as a comment.`,{subreddit:sub,requested_action:"create_post",constraint:"image_post_without_body"});});
-        await bodyField.fill(String(d.content.body));
+        bodyField = await this.fillRedditBody(page, bodyField, String(d.content.body), this.bodyFormat(d));
       }
     } else if (d.content.url) {
       linkField = await this.needUniqueTextbox(page, [/url/i, /посилання/i, /ссылк/i]);
@@ -407,7 +409,7 @@ export class RedditBrowserAdapter implements Adapter {
     } else if (d.content.body) {
       try {
         bodyField = await this.needUniqueTextbox(page, [/body/i, /^text$/i, /текст/i], titleField);
-        await bodyField.fill(String(d.content.body));
+        bodyField = await this.fillRedditBody(page, bodyField, String(d.content.body), this.bodyFormat(d));
       } catch (e) {
         if (/may not use the body textbox|не можна використовувати поле body|не используйте поле body/i.test(pageText)) throw new PublisherError("SUBREDDIT_FORMAT_CONSTRAINT", `r/${sub} does not allow a body textbox for this post type. The requested body was not filled and nothing was published; use a title-only post or choose another subreddit.`, { subreddit: sub, requested_action: "create_post", constraint: "title_only" });
         throw e;
@@ -442,6 +444,7 @@ export class RedditBrowserAdapter implements Adapter {
     await this.requireTargetAvailable(page, id);
     const scope = await this.targetScope(page, id);
     let bodyField: Locator;
+    let bodyScope: Page | Locator = scope;
     if (id.commentId) {
       const reply = await this.needUniqueAny(scope, ["button"], ui.comment);
       await reply.click();
@@ -449,9 +452,10 @@ export class RedditBrowserAdapter implements Adapter {
         .catch(() => this.needUniqueTextbox(page, [/comment/i, /reply/i, /коментар/i, /відповід/i, /ответ/i]));
     } else {
       const composer = await this.postCommentComposer(page, id);
+      bodyScope = composer;
       bodyField = await this.needUniqueTextbox(composer, [/comment/i, /reply/i, /коментар/i, /відповід/i, /ответ/i]);
     }
-    await bodyField.fill(String(d.content.body));
+    bodyField = await this.fillRedditBody(bodyScope, bodyField, String(d.content.body), this.bodyFormat(d));
     const form = await this.formFor(page, bodyField);
     const submit = await this.commentSubmit(form);
     return { page, action: d.action, pageUrl: page.url(), targetIdentity: id.fullname, targetScope: scope, submit, bodyField, body: String(d.content.body) };
@@ -472,8 +476,8 @@ export class RedditBrowserAdapter implements Adapter {
     }
     const edit = await this.needUniqueAny(scope, ["button", "menuitem"], ui.edit);
     await edit.click();
-    const bodyField = await this.needUniqueTextbox(scope, [/body/i, /text/i, /comment/i, /текст/i]);
-    await bodyField.fill(String(d.content.body));
+    let bodyField = await this.needUniqueTextbox(scope, [/body/i, /text/i, /comment/i, /текст/i]);
+    bodyField = await this.fillRedditBody(scope, bodyField, String(d.content.body), this.bodyFormat(d));
     const form = await this.formFor(page, bodyField);
     const submit = await this.needUniqueAny(form, ["button"], ui.save);
     return { page, action: d.action, pageUrl: page.url(), targetIdentity: id.fullname, targetScope: scope, submit, bodyField, body: String(d.content.body) };
@@ -528,6 +532,36 @@ export class RedditBrowserAdapter implements Adapter {
     for (let i = 0; i < await adds.count(); i += 1) if (await adds.nth(i).isVisible().catch(() => false)) apply = adds.nth(i);
     if (apply) await apply.click();
     return trigger;
+  }
+
+  private bodyFormat(d: Draft): "plain" | "markdown" {
+    const format = String(d.content.body_format ?? "plain").toLowerCase();
+    if (format !== "plain" && format !== "markdown") throw new PublisherError("REDDIT_BODY_FORMAT_INVALID", "Reddit body_format must be plain or markdown.");
+    return format;
+  }
+
+  private async fillRedditBody(scope: Page | Locator, field: Locator, body: string, format: "plain" | "markdown"): Promise<Locator> {
+    if (format === "plain") {
+      await field.fill(body);
+      return field;
+    }
+    let target = field;
+    const initialTag = await target.evaluate(element => element.tagName.toLowerCase()).catch(() => "");
+    if (initialTag !== "textarea") {
+      const toggle = await this.findAny(scope, ["button", "link"], ui.markdown);
+      if (!toggle) throw new PublisherError("REDDIT_MARKDOWN_UNAVAILABLE", "Reddit is showing a rich-text editor but no Markdown Editor control was found. Nothing was published; use plain formatting or inspect the current Reddit editor UI.");
+      await toggle.click();
+      const page = "page" in scope ? scope.page() : scope;
+      await page.waitForTimeout(300);
+      const textareas = scope.locator('textarea[name="body"],textarea[name="textarea"],textarea');
+      const count = await this.visibleCount(textareas);
+      if (count !== 1) throw new Error(`SITE_CHANGED: expected one Markdown textarea after switching editor, found ${count}`);
+      target = textareas.filter({ visible: true }).first();
+    }
+    const finalTag = await target.evaluate(element => element.tagName.toLowerCase()).catch(() => "");
+    if (finalTag !== "textarea") throw new PublisherError("REDDIT_MARKDOWN_UNAVAILABLE", "Reddit did not expose a Markdown textarea after switching editor. Nothing was published.");
+    await target.fill(body);
+    return target;
   }
 
   private mediaFiles(d: Draft): MediaFile[] {

@@ -17,7 +17,7 @@ context-aware draft
 For finalized posts/comments, use the one-step consequential write path:
 
 ```text
-publishRedditPost / publishRedditComment
+publishRedditPost / publishRedditComment / publishRedditEdit
         ↓
 platform action approval when required
         ↓
@@ -88,6 +88,7 @@ External write:
 
 - `publishRedditPost` — one-step consequential publish for finalized posts; internally performs live preview verification first.
 - `publishRedditComment` — one-step consequential publish for finalized comments/replies; internally performs live preview verification first.
+- `publishRedditEdit` — one-step consequential save for finalized edits of the owner's Reddit post body/comment text; Reddit titles are not editable.
 - `publishPublication` — legacy two-step consequential publish for an exact existing preview.
 
 ### Reddit context
@@ -101,10 +102,14 @@ Typical flow:
 3. `getRedditThread` loads the exact post/comment and nested comment context before drafting a response.
 4. If the owner then says to post the finalized reply, call `publishRedditComment` directly. Use a separate preview only when the owner asks to inspect it before publishing.
 
-`getRedditThread` accepts a canonical Reddit post or comment permalink. When the target is a comment, the response includes `target_comment` in addition to the surrounding nested comment tree.
+`getRedditThread` accepts a canonical Reddit post or comment permalink. When the target is a comment, the response includes `target_comment` in addition to the surrounding nested comment tree. For post URLs it also returns `top_comment` (highest score among returned top-level comments), `newest_comment`, and `oldest_comment`, each with an exact permalink suitable for replying.
 
 ### Reddit images
 
 `previewRedditPost` accepts 1–4 ChatGPT conversation images through `openaiFileIdRefs`. Files are downloaded immediately into the protected local artifacts directory, validated by payload signature, and used only for the matching preview.
+
+### Reddit text formatting
+
+Post bodies, comments/replies, and edits accept `body_format: "plain" | "markdown"` (default `plain`). Use `markdown` for Reddit Markdown such as `**bold**`, `*italic*`, headings, lists, quotes, links, code, and spoiler syntax. The browser adapter switches to Reddit's Markdown editor and fails safely if it cannot verify that editor, instead of publishing raw Markdown markers by accident.
 
 Recommended Custom GPT instructions are in [`actions/gpt-instructions.md`](../actions/gpt-instructions.md).
