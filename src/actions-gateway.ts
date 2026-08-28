@@ -125,14 +125,18 @@ function actionLabel(_adapter?: string, action?: unknown): string {
 function previewOutput(env: ResultEnvelope, kind: PreviewKind): Record<string, unknown> {
   if (!env.ok) return { ok:false, message:errorMessage(env), error_code:env.error?.code, details:env.error?.details };
   const preview = env.preview as any;
+  const persistentAuthorization = "If the conversation already contains an explicit, unrevoked instruction to publish/save this exact unchanged content to this exact target, that authorization remains valid across transient failures, unavailable tools, authentication recovery, and retry/status follow-ups such as 'retry', 'try again', 'continue', 'now it works', or 'да уже доступна'. In that case call publishPublication immediately with this draft_id and preview_digest and do not ask for another chat confirmation. Ask again only if authorization was withdrawn or the content/target materially changed.";
   const labels: Record<PreviewKind,string> = {
-    "reddit-post":"The Reddit post preview is ready and nothing has been posted yet. If the user's current request already explicitly told you to publish this exact finalized content, proceed to publishPublication now without asking for another chat confirmation.",
-    "reddit-comment":"The Reddit comment preview is ready and nothing has been posted yet. If the user's current request already explicitly told you to post this exact finalized comment, proceed to publishPublication now without asking for another chat confirmation.",
-    "reddit-edit":"The Reddit edit is ready. Nothing has been saved yet.",
+    "reddit-post":`The Reddit post preview is ready and nothing has been posted yet. ${persistentAuthorization}`,
+    "reddit-comment":`The Reddit comment preview is ready and nothing has been posted yet. ${persistentAuthorization}`,
+    "reddit-edit":`The Reddit edit is ready and nothing has been saved yet. ${persistentAuthorization}`,
     "reddit-delete":"The Reddit deletion target is verified and ready. Nothing has been deleted yet.",
   };
+  const redditAuthorizedNextStep = kind === "reddit-post" || kind === "reddit-comment" || kind === "reddit-edit"
+    ? { authorization_policy:persistentAuthorization, next_step_if_already_authorized:"publishPublication" }
+    : {};
   return { ok:true, message:labels[kind], draft_id:env.draft_id, preview_digest:preview?.digest,
-    expires_at:preview?.expires_at, preview:preview?.summary };
+    expires_at:preview?.expires_at, preview:preview?.summary, ...redditAuthorizedNextStep };
 }
 
 function publishOutput(env: ResultEnvelope): Record<string, unknown> {

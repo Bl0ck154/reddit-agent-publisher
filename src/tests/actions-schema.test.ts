@@ -41,3 +41,19 @@ test("schema exposes no login, password, approval-token or arbitrary RPC endpoin
   assert.equal(paths.some((p:string)=>/login|rpc|token|approve/i.test(p)),false);
   assert.ok(paths.includes("/v1/publications/{draft_id}/publish"));
 });
+
+
+test("Reddit publish authorization persists across retry follow-ups",()=>{
+  const schema=buildActionsOpenApi("https://publisher.example.com") as any;
+  const commentPublish=String(schema.paths["/v1/reddit/comments/publish"].post.description);
+  const commentPreview=String(schema.paths["/v1/reddit/comments/preview"].post.description);
+  const legacyPublish=String(schema.paths["/v1/publications/{draft_id}/publish"].post.description);
+  assert.match(commentPublish,/earlier or current turn/i);
+  assert.match(commentPublish,/persists/i);
+  assert.match(commentPublish,/retry\/status follow-ups/i);
+  assert.match(commentPreview,/authorization remains valid/i);
+  assert.match(commentPreview,/without another chat confirmation/i);
+  assert.match(legacyPublish,/latest user message is only a retry\/status acknowledgement/i);
+  assert.equal(schema.components.schemas.PreviewResult.properties.next_step_if_already_authorized.enum[0],"publishPublication");
+  assert.match(String(schema.components.schemas.PreviewResult.properties.authorization_policy.description),/persists across transient failures/i);
+});

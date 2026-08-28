@@ -24,7 +24,7 @@ platform action approval when required
 server performs live preview verification and publishes the exact content
 ```
 
-Use `previewRedditPost` / `previewRedditComment` only when the owner explicitly wants to inspect the live preview first. Preview endpoints never click Reddit's final Post/Comment/Save/Delete action. The legacy consequential `publishPublication` endpoint remains available to publish an exact still-valid `draft_id + preview_digest` from such a preview.
+Use `previewRedditPost` / `previewRedditComment` only when the owner explicitly wants to inspect the live preview first. Preview endpoints never click Reddit's final Post/Comment/Save/Delete action. Explicit authorization for exact unchanged content/target may come from an earlier still-relevant turn and persists through transient failures, unavailable tools, authentication recovery, and retry/status follow-ups until withdrawn or until content/target materially changes. If a preview is reached while retrying an already-authorized write, call the legacy consequential `publishPublication` immediately with its exact still-valid `draft_id + preview_digest` instead of asking the owner to authorize it again.
 
 ## Start the daemon
 

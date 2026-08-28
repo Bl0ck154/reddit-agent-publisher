@@ -111,7 +111,7 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
           operationId: "publishRedditPost",
           "x-openai-isConsequential": true,
           summary: "Publish a finalized Reddit post in one step",
-          description: "CONSEQUENTIAL. Use when the user has already explicitly asked to publish/post the finalized content. The server internally prepares and verifies a live Reddit preview, then publishes that exact content. Do not ask for an additional chat confirmation before calling this action; ChatGPT's action-approval UI handles any required approval.",
+          description: "CONSEQUENTIAL. Use when the user has explicitly asked to publish/post this finalized content in any still-relevant earlier or current turn. That authorization persists for this exact unchanged content/target across transient failures, unavailable tools, authentication recovery, and retry/status follow-ups. Do not ask for an additional chat confirmation before calling this action; ChatGPT's action-approval UI handles any required approval.",
           requestBody: jsonBody({
             type: "object", required: ["subreddit", "title"], additionalProperties: false,
             properties: {
@@ -132,7 +132,7 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
           operationId: "publishRedditComment",
           "x-openai-isConsequential": true,
           summary: "Publish a finalized Reddit comment in one step",
-          description: "CONSEQUENTIAL. Use when the user has already explicitly asked to post the finalized comment/reply to the exact Reddit permalink. The server internally prepares and verifies a live preview before submitting. Do not ask for an additional chat confirmation before calling this action.",
+          description: "CONSEQUENTIAL. Use when the user has explicitly asked to post this finalized comment/reply to this exact Reddit target in any still-relevant earlier or current turn. That authorization persists for the exact unchanged reply/target across transient failures, unavailable tools, authentication recovery, and retry/status follow-ups. Do not ask for an additional chat confirmation before calling this action.",
           requestBody: jsonBody({
             type: "object", required: ["url", "body"], additionalProperties: false,
             properties: { url: { type: "string", format: "uri" }, body: { type: "string" }, body_format: bodyFormat, account },
@@ -145,7 +145,7 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
           operationId: "publishRedditEdit",
           "x-openai-isConsequential": true,
           summary: "Edit the owner's Reddit post or comment in one step",
-          description: "CONSEQUENTIAL. Use when the user has finalized replacement body text for an exact owned Reddit post/comment. Reddit post titles cannot be edited; this changes only the body/comment text. The server verifies ownership from the live Reddit UI before saving.",
+          description: "CONSEQUENTIAL. Use when the user has finalized replacement body text for an exact owned Reddit post/comment and explicitly authorized saving it in any still-relevant earlier or current turn. That authorization persists for the exact unchanged edit/target across transient failures and retry/status follow-ups. Reddit post titles cannot be edited; this changes only the body/comment text. The server verifies ownership from the live Reddit UI before saving.",
           requestBody: jsonBody({
             type: "object", required: ["url", "body"], additionalProperties: false,
             properties: { url: { type: "string", format: "uri" }, body: { type: "string" }, body_format: bodyFormat, account },
@@ -158,7 +158,7 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
           operationId: "previewRedditPost",
           "x-openai-isConsequential": false,
           summary: "Prepare a Reddit post preview",
-          description: "Fills the exact Reddit form in the authenticated browser but does not click Post. Use this when the user explicitly wants to inspect/review a preview before publishing, not as a mandatory extra confirmation step.",
+          description: "Fills the exact Reddit form in the authenticated browser but does not click Post. Use this when the user explicitly wants to inspect/review a preview before publishing, not as a mandatory extra confirmation step. If this preview occurs during a retry of content the user already explicitly authorized earlier in the conversation, that prior authorization remains valid for the unchanged content/target and you should publish it without asking again.",
           requestBody: jsonBody({
             type: "object", required: ["subreddit", "title"], additionalProperties: false,
             properties: {
@@ -179,7 +179,7 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
           operationId: "previewRedditComment",
           "x-openai-isConsequential": false,
           summary: "Prepare a Reddit comment preview",
-          description: "Fills a comment/reply form for the exact canonical Reddit permalink but does not submit it.",
+          description: "Fills a comment/reply form for the exact canonical Reddit permalink but does not submit it. Do not use this as an extra confirmation step. If this is a retry of an exact unchanged comment/reply the user already explicitly authorized earlier in the conversation, that authorization remains valid and the next step is publishPublication without another chat confirmation.",
           requestBody: jsonBody({
             type: "object", required: ["url", "body"], additionalProperties: false,
             properties: { url: { type: "string", format: "uri" }, body: { type: "string" }, body_format: bodyFormat, account },
@@ -192,7 +192,7 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
           operationId: "previewRedditEdit",
           "x-openai-isConsequential": false,
           summary: "Prepare an edit of the owner's Reddit content",
-          description: "Opens the exact owned Reddit post/comment and fills the edit form without saving it.",
+          description: "Opens the exact owned Reddit post/comment and fills the edit form without saving it. Do not use this as an extra confirmation step. If this is a retry of an exact unchanged edit the user already explicitly authorized earlier in the conversation, that authorization remains valid and the next step is publishPublication without another chat confirmation.",
           requestBody: jsonBody({
             type: "object", required: ["url", "body"], additionalProperties: false,
             properties: { url: { type: "string", format: "uri" }, body: { type: "string" }, body_format: bodyFormat, account },
@@ -218,7 +218,7 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
           operationId: "publishPublication",
           "x-openai-isConsequential": true,
           summary: "Publish the exact previously previewed content",
-          description: "CONSEQUENTIAL: publishes an existing live preview. Use this legacy two-step endpoint when a preview was intentionally requested or already exists. If the user has already explicitly asked to publish finalized Reddit content, prefer the one-step publishRedditPost/publishRedditComment action instead of asking for another chat confirmation. Safe to retry after a successful publish; the service will not publish the same draft twice.",
+          description: "CONSEQUENTIAL: publishes an existing live preview. Use this legacy two-step endpoint when a preview was intentionally requested or already exists. If the conversation already contains an explicit, unrevoked authorization to publish/save this exact unchanged Reddit content to this exact target, call this action immediately and do not ask another chat confirmation, even when the latest user message is only a retry/status acknowledgement after a transient failure. Authorization stops carrying forward only if withdrawn or if content/target materially changed. Safe to retry after a successful publish; the service will not publish the same draft twice.",
           parameters: [{ name: "draft_id", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
           requestBody: jsonBody({
             type: "object", required: ["preview_digest"], additionalProperties: false,
@@ -240,6 +240,8 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
           properties: {
             ok: { type: "boolean" }, message: { type: "string" }, draft_id: { type: "string" }, preview_digest: { type: "string" },
             expires_at: { type: "string" }, preview: { type: "object", additionalProperties: true }, error_code: { type: "string" },
+            authorization_policy: { type: "string", description: "For Reddit post/comment/edit previews: earlier explicit authorization for the exact unchanged content and target persists across transient failures and retry/status follow-ups." },
+            next_step_if_already_authorized: { type: "string", enum: ["publishPublication"], description: "When prior explicit authorization is still valid, call this operation immediately instead of asking for another chat confirmation." },
           },
         },
         PublishResult: {
