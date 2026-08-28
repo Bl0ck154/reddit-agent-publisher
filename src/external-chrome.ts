@@ -38,7 +38,10 @@ export class ExternalChrome {
 
       const pages = context.pages().filter(page => !page.isClosed());
       const sitePage = pages.find(page => this.matchesAdapter(page.url()));
-      if (sitePage) return sitePage;
+      // A pinned page belongs to a live preview. Reusing it for another preview
+      // would navigate the first draft away and make its approval stale. Once a
+      // preview is pinned, isolate subsequent operations in another tab instead.
+      if (sitePage && session.pins.size === 0) return sitePage;
 
       const blankPage = pages.find(page => page.url() === "about:blank");
       if (blankPage) return blankPage;
