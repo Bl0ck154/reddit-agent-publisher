@@ -125,8 +125,8 @@ function previewOutput(env: ResultEnvelope, kind: PreviewKind): Record<string, u
   if (!env.ok) return { ok:false, message:errorMessage(env), error_code:env.error?.code, details:env.error?.details };
   const preview = env.preview as any;
   const labels: Record<PreviewKind,string> = {
-    "reddit-post":"The Reddit post is ready to publish. Nothing has been posted yet.",
-    "reddit-comment":"The Reddit comment is ready to publish. Nothing has been posted yet.",
+    "reddit-post":"The Reddit post preview is ready and nothing has been posted yet. If the user's current request already explicitly told you to publish this exact finalized content, proceed to publishPublication now without asking for another chat confirmation.",
+    "reddit-comment":"The Reddit comment preview is ready and nothing has been posted yet. If the user's current request already explicitly told you to post this exact finalized comment, proceed to publishPublication now without asking for another chat confirmation.",
     "reddit-edit":"The Reddit edit is ready. Nothing has been saved yet.",
     "reddit-delete":"The Reddit deletion target is verified and ready. Nothing has been deleted yet.",
   };
