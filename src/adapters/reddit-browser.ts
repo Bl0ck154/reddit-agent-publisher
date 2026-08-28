@@ -115,9 +115,9 @@ const ui = {
   post: [/^post$/i, /^опублікувати$/i, /^опубликовать$/i],
   comment: [/^comment$/i, /^reply$/i, /^коментувати$/i, /^відповісти$/i, /^комментировать$/i, /^ответить$/i],
   save: [/^save$/i, /^зберегти$/i, /^сохранить$/i],
-  edit: [/^edit$/i, /редагувати/i, /изменить/i],
+  edit: [/^edit$/i, /^edit post body$/i, /^edit comment$/i, /редагувати/i, /изменить/i],
   delete: [/^delete$/i, /видалити/i, /удалить/i],
-  more: [/more options/i, /more actions/i, /overflow/i, /додаткові дії/i, /інші параметри/i, /другие действия/i, /ещё/i],
+  more: [/open user actions/i, /more options/i, /more actions/i, /overflow/i, /додаткові дії/i, /інші параметри/i, /другие действия/i, /ещё/i],
   flair: [/add flair/i, /post flair/i, /^flair$/i, /додати flair/i, /выбрать flair/i],
   markdown: [/^markdown editor$/i, /^markdown mode$/i, /switch to markdown/i, /use markdown/i, /редактор markdown/i, /режим markdown/i],
 };
@@ -269,7 +269,7 @@ export class RedditBrowserAdapter implements Adapter {
 
     const page = await this.page(account, true);
     try {
-      await page.goto(`https://www.reddit.com/r/${encodeURIComponent(sub)}/submit?type=TEXT`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+      await this.gotoRetry(page, `https://www.reddit.com/r/${encodeURIComponent(sub)}/submit?type=TEXT`);
       this.assertOrigin(page.url());
       await this.requireAuth(page);
       // Reddit hydrates the flair web component after the title and Post controls.
@@ -368,7 +368,7 @@ export class RedditBrowserAdapter implements Adapter {
       browser_idle_seconds: this.config.browserIdleSeconds ?? 90, metadata_cache_seconds: this.config.redditMetadataCacheSeconds ?? 900 };
     const page = await this.page("default", true);
     try {
-      await page.goto("https://www.reddit.com/", { waitUntil: "domcontentloaded", timeout: 30_000 });
+      await this.gotoRetry(page, "https://www.reddit.com/");
       this.assertOrigin(page.url());
       const gate = await this.gate(page);
       return { adapter: this.id, backend: "browser", chrome_exists: chrome, reddit_reachable: !gate, title: await page.title(), authenticated: !gate, requires_user_action: gate };
@@ -383,7 +383,7 @@ export class RedditBrowserAdapter implements Adapter {
     const sub = this.subreddit(String(d.target.subreddit));
     const media = this.mediaFiles(d);
     const requested = `https://www.reddit.com/r/${encodeURIComponent(sub)}/submit?type=${media.length ? "IMAGE" : d.content.url ? "LINK" : "TEXT"}`;
-    await page.goto(requested, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await this.gotoRetry(page, requested);
     this.assertOrigin(page.url());
     await this.requireAuth(page);
     if (!new URL(page.url()).pathname.startsWith(`/r/${sub}/submit`)) throw new PublisherError("SUBREDDIT_RESTRICTED", `Reddit did not open the post form for r/${sub} and redirected to ${page.url()}. The community may be private, approval-only, or unavailable to this account; no post was filled or published.`, { subreddit: sub, requested_url: requested, current_url: page.url(), requested_action: "create_post" });
@@ -438,7 +438,7 @@ export class RedditBrowserAdapter implements Adapter {
 
   private async previewComment(page: Page, d: Draft): Promise<PreviewSession> {
     const id = this.permalink(String(d.target.url));
-    await page.goto(id.permalink, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await this.gotoRetry(page, id.permalink);
     this.assertOrigin(page.url());
     await this.requireAuth(page);
     this.assertSameTarget(page.url(), id);
@@ -464,7 +464,7 @@ export class RedditBrowserAdapter implements Adapter {
 
   private async previewOwnMutation(page: Page, d: Draft): Promise<PreviewSession> {
     const id = this.permalink(String(d.target.url));
-    await page.goto(id.permalink, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await this.gotoRetry(page, id.permalink);
     this.assertOrigin(page.url());
     await this.requireAuth(page);
     this.assertSameTarget(page.url(), id);
@@ -739,8 +739,20 @@ export class RedditBrowserAdapter implements Adapter {
         return;
       } catch (e: any) {
         last = e;
-        if (!String(e.message).includes("ERR_CERT_VERIFIER_CHANGED")) throw e;
-        await page.waitForTimeout(750);
+        const message = String(e?.message ?? e);
+        if (/Timeout 30000ms exceeded/i.test(message)) {
+          const reached = (() => {
+            try {
+              const actual = new URL(page.url());
+              const expected = new URL(url);
+              return this.isRedditPage(actual.toString()) && actual.pathname === expected.pathname;
+            } catch { return false; }
+          })();
+          const body = reached ? (await page.locator("body").innerText().catch(() => "")).trim() : "";
+          if (reached && body.length > 40) return;
+        }
+        if (!message.includes("ERR_CERT_VERIFIER_CHANGED") && !/Timeout 30000ms exceeded/i.test(message)) throw e;
+        if (i < 2) await page.waitForTimeout(750);
       }
     }
     throw last;

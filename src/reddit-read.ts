@@ -318,13 +318,39 @@ export class RedditReader {
     const page = await this.chrome.page(account);
     try {
       if (!this.isRedditPage(page.url())) {
-        await page.goto("https://www.reddit.com/", { waitUntil: "domcontentloaded", timeout: 30_000 });
+        await this.gotoRetry(page, "https://www.reddit.com/");
       }
       if (!this.isRedditPage(page.url())) throw new Error("TAKEOVER_REQUIRED: Reddit did not open in the authenticated browser session");
       return await fn(page);
     } finally {
       this.chrome.release(account);
     }
+  }
+
+  private async gotoRetry(page: Page, url: string): Promise<void> {
+    let last: unknown;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+        return;
+      } catch (error: any) {
+        last = error;
+        const message = String(error?.message ?? error);
+        if (/Timeout 30000ms exceeded/i.test(message)) {
+          let reached = false;
+          try {
+            const actual = new URL(page.url());
+            const expected = new URL(url);
+            reached = this.isRedditPage(actual.toString()) && actual.pathname === expected.pathname;
+          } catch {}
+          const body = reached ? (await page.locator("body").innerText().catch(() => "")).trim() : "";
+          if (reached && body.length > 40) return;
+        }
+        if (!message.includes("ERR_CERT_VERIFIER_CHANGED") && !/Timeout 30000ms exceeded/i.test(message)) throw error;
+        if (attempt < 2) await page.waitForTimeout(750);
+      }
+    }
+    throw last;
   }
 
   private async username(page: Page): Promise<string> {
