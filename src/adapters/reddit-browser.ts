@@ -457,8 +457,7 @@ export class RedditBrowserAdapter implements Adapter {
       bodyField = await this.needUniqueTextbox(composer, [/comment/i, /reply/i, /коментар/i, /відповід/i, /ответ/i]);
     }
     bodyField = await this.fillRedditBody(bodyScope, bodyField, String(d.content.body), this.bodyFormat(d));
-    const form = await this.formFor(page, bodyField);
-    const submit = await this.commentSubmit(form);
+    const submit = await this.commentSubmit(bodyScope);
     return { page, action: d.action, pageUrl: page.url(), targetIdentity: id.fullname, targetScope: scope, submit, bodyField, body: String(d.content.body) };
   }
 
@@ -549,7 +548,19 @@ export class RedditBrowserAdapter implements Adapter {
     let target = field;
     const initialTag = await target.evaluate(element => element.tagName.toLowerCase()).catch(() => "");
     if (initialTag !== "textarea") {
-      const toggle = await this.findAny(scope, ["button", "link"], ui.markdown);
+      let toggle = await this.findAny(scope, ["button", "link"], ui.markdown);
+      if (!toggle) {
+        const cssCandidates = scope.locator('button[aria-label*="markdown" i],button[slot="top-toolbar-right"]');
+        const matches: Locator[] = [];
+        for (let i = 0; i < await cssCandidates.count(); i += 1) {
+          const item = cssCandidates.nth(i);
+          if (!await item.isVisible().catch(() => false)) continue;
+          const label = `${await item.innerText().catch(() => "")} ${await item.getAttribute("aria-label").catch(() => "") ?? ""}`.trim();
+          if (/markdown/i.test(label)) matches.push(item);
+        }
+        if (matches.length === 1) toggle = matches[0];
+        if (matches.length > 1) throw new Error(`AMBIGUOUS_TARGET: expected one Reddit Markdown toggle, found ${matches.length}`);
+      }
       if (!toggle) throw new PublisherError("REDDIT_MARKDOWN_UNAVAILABLE", "Reddit is showing a rich-text editor but no Markdown Editor control was found. Nothing was published; use plain formatting or inspect the current Reddit editor UI.");
       await toggle.click();
       const page = "page" in scope ? scope.page() : scope;
