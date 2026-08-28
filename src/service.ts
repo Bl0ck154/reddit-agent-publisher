@@ -49,7 +49,10 @@ export class PublisherService {
       return envelope({ state: p.requires_user ? "NEEDS_USER" : "PREVIEWED", adapter: d.adapter, account: d.account,
         draft_id: id, revision: d.revision, preview: { digest: pd, summary: p.summary, artifact_path: p.artifact_path, artifact_sha256, expires_at: expires },
         next_actions: p.requires_user ? [{ tool: "auth_login", required: true }] : [{ tool: "owner_cli_approve", required: true, args: { draft_id: id, preview_digest: pd } }] });
-    } catch (e: any) { return this.fail(e, id); }
+    } catch (e: any) {
+      try { this.store.audit("draft.preview_failed", actor, id, { code: e?.code ?? undefined, error: String(e?.message ?? e).slice(0, 500) }); } catch {}
+      return this.fail(e, id);
+    }
   }
 
   async approve(id: string, previewDigest: string, confirmation: string, actor = "cli"): Promise<ResultEnvelope> {

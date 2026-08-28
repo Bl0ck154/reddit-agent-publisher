@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { canonicalRedditPublishedPostUrl, extractCommunityRulesText, formatSubredditRulesPayload, normalizeFlairOptions, RedditBrowserAdapter } from "../adapters/reddit-browser.js";
+import { canonicalRedditPublishedPostUrl, detectRedditTargetUnavailableText, extractCommunityRulesText, formatSubredditRulesPayload, normalizeFlairOptions, RedditBrowserAdapter } from "../adapters/reddit-browser.js";
 import type { Config } from "../config.js";
 import type { Draft } from "../types.js";
 
@@ -91,4 +91,10 @@ test("Reddit publish redirect is converted to a stable post permalink",()=>{
 test("Reddit direct post URL is canonicalized and tracking query is removed",()=>{
   assert.deepEqual(canonicalRedditPublishedPostUrl("https://www.reddit.com/r/Telegram/comments/1vvgd46/some_title/?utm_source=chatgpt.com","Telegram"),{url:"https://www.reddit.com/r/Telegram/comments/1vvgd46/",fullname:"t3_1vvgd46"});
   assert.equal(canonicalRedditPublishedPostUrl("https://example.com/?created=t3_1vvgd46","Telegram"),undefined);
+});
+
+test("Reddit unavailable-page text is classified separately from UI changes",()=>{
+  assert.equal(detectRedditTargetUnavailableText("Page not found\nExplore Reddit Communities"),"page_not_found");
+  assert.equal(detectRedditTargetUnavailableText("This post was deleted by the person who originally posted it."),"deleted");
+  assert.equal(detectRedditTargetUnavailableText("Normal live Reddit post"),undefined);
 });

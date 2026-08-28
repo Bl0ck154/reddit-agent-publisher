@@ -37,6 +37,15 @@ export function normalizeFlairOptions(values: string[]): string[] {
   });
 }
 
+export function detectRedditTargetUnavailableText(text: string): string | undefined {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (/\bPage not found\b/i.test(normalized)) return "page_not_found";
+  if (/\b(?:this )?post (?:was|has been) deleted\b/i.test(normalized)) return "deleted";
+  if (/\bpost (?:was|has been) removed\b/i.test(normalized) || /\bremoved by (?:the )?moderators\b/i.test(normalized)) return "removed";
+  if (/\bcontent is no longer available\b/i.test(normalized)) return "unavailable";
+  return undefined;
+}
+
 type NormalizedRedditRule = {
   short_name: string;
   description: string;
@@ -430,6 +439,7 @@ export class RedditBrowserAdapter implements Adapter {
     this.assertOrigin(page.url());
     await this.requireAuth(page);
     this.assertSameTarget(page.url(), id);
+    await this.requireTargetAvailable(page, id);
     const scope = await this.targetScope(page, id);
     let bodyField: Locator;
     if (id.commentId) {
@@ -453,6 +463,7 @@ export class RedditBrowserAdapter implements Adapter {
     this.assertOrigin(page.url());
     await this.requireAuth(page);
     this.assertSameTarget(page.url(), id);
+    await this.requireTargetAvailable(page, id);
     const scope = await this.targetScope(page, id);
     await this.openOwnActions(scope, d.action);
     if (d.action === "delete") {
@@ -573,6 +584,17 @@ export class RedditBrowserAdapter implements Adapter {
     const deadline=Date.now()+timeoutMs;
     while(Date.now()<deadline){if(await control.isEnabled().catch(()=>false))return;await control.page().waitForTimeout(500);}
     throw new Error(message);
+  }
+
+  private async requireTargetAvailable(page: Page, id: TargetIdentity): Promise<void> {
+    const bodyText = (await page.locator("body").innerText().catch(() => "")).slice(0, 20_000);
+    const reason = detectRedditTargetUnavailableText(bodyText);
+    if (!reason) return;
+    throw new PublisherError(
+      "REDDIT_TARGET_UNAVAILABLE",
+      `The Reddit target ${id.fullname} is unavailable (${reason.replace(/_/g, " ")}). It may have been deleted, removed, or the link may be stale. Nothing was published.`,
+      { target_fullname: id.fullname, target_url: id.permalink, current_url: page.url(), reason },
+    );
   }
 
   private async targetScope(page: Page, id: TargetIdentity): Promise<Locator> {
