@@ -812,6 +812,12 @@ export class RedditBrowserAdapter implements Adapter {
         for (let i = 0; i < await x.count(); i += 1) {
           const item = x.nth(i);
           if (!await item.isVisible().catch(() => false)) continue;
+          const editable = await item.evaluate(element => {
+            const tag = element.tagName.toLowerCase();
+            const role = element.getAttribute("role");
+            return tag === "input" || tag === "textarea" || element.getAttribute("contenteditable") === "true" || role === "textbox";
+          }).catch(() => false);
+          if (!editable) continue;
           if (exclude && await item.evaluate((e, other) => e === other, await exclude.elementHandle())) continue;
           visible.push(item);
         }
