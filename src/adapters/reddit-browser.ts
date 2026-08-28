@@ -38,6 +38,10 @@ export function normalizeFlairOptions(values: string[]): string[] {
   });
 }
 
+export function redditCommentControlMatchesTarget(ownerFullname: string | undefined, targetFullname: string): boolean {
+  return ownerFullname === targetFullname;
+}
+
 export function detectRedditTargetUnavailableText(text: string): string | undefined {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (/\bPage not found\b/i.test(normalized)) return "page_not_found";
@@ -447,7 +451,7 @@ export class RedditBrowserAdapter implements Adapter {
     let bodyField: Locator;
     let bodyScope: Page | Locator = scope;
     if (id.commentId) {
-      const reply = await this.needUniqueAny(scope, ["button"], ui.comment);
+      const reply = await this.needUniqueDirectCommentControl(scope, id.fullname, ["button"], ui.comment);
       await reply.click();
       bodyField = await this.needUniqueTextbox(scope, [/comment/i, /reply/i, /коментар/i, /відповід/i, /ответ/i])
         .catch(() => this.needUniqueTextbox(page, [/comment/i, /reply/i, /коментар/i, /відповід/i, /ответ/i]));
@@ -832,6 +836,32 @@ export class RedditBrowserAdapter implements Adapter {
       if (attempt < 19) await page.waitForTimeout(250);
     }
     throw new Error("SITE_CHANGED: expected semantic control not found");
+  }
+
+  private async needUniqueDirectCommentControl(scope: Locator, targetFullname: string, roles: Role[], names: RegExp[]): Promise<Locator> {
+    const page = scope.page();
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      for (const role of roles) for (const name of names) {
+        const candidates = scope.getByRole(role as any, { name });
+        const direct: Locator[] = [];
+        for (let i = 0; i < await candidates.count(); i += 1) {
+          const item = candidates.nth(i);
+          if (!await item.isVisible().catch(() => false)) continue;
+          const ownerFullname = await item.evaluate(element => {
+            const comment = element.closest("shreddit-comment");
+            return comment?.getAttribute("thingid")
+              ?? comment?.getAttribute("id")
+              ?? comment?.getAttribute("data-fullname")
+              ?? undefined;
+          }).catch(() => undefined);
+          if (redditCommentControlMatchesTarget(ownerFullname, targetFullname)) direct.push(item);
+        }
+        if (direct.length === 1) return direct[0];
+        if (direct.length > 1) throw new Error(`AMBIGUOUS_TARGET: multiple direct ${role} controls for ${targetFullname}`);
+      }
+      if (attempt < 19) await page.waitForTimeout(250);
+    }
+    throw new Error(`SITE_CHANGED: direct semantic control for ${targetFullname} not found`);
   }
 
   private async needUniqueTextbox(scope: Page | Locator, names: RegExp[], exclude?: Locator): Promise<Locator> {

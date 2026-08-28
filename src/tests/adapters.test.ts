@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { canonicalRedditPublishedPostUrl, detectRedditTargetUnavailableText, extractCommunityRulesText, formatSubredditRulesPayload, normalizeFlairOptions, RedditBrowserAdapter } from "../adapters/reddit-browser.js";
+import { canonicalRedditPublishedPostUrl, detectRedditTargetUnavailableText, extractCommunityRulesText, formatSubredditRulesPayload, normalizeFlairOptions, redditCommentControlMatchesTarget, RedditBrowserAdapter } from "../adapters/reddit-browser.js";
 import type { Config } from "../config.js";
 import type { Draft } from "../types.js";
 
@@ -103,4 +103,11 @@ test("Reddit body_format accepts markdown and rejects unknown modes",async()=>{
   const a=new RedditBrowserAdapter(config);
   await a.validate({...base,adapter:"reddit",action:"create_comment",target:{url:"https://www.reddit.com/r/example/comments/abc123/title/"},content:{body:"**bold**",body_format:"markdown"}} as Draft);
   await assert.rejects(()=>a.validate({...base,adapter:"reddit",action:"create_comment",target:{url:"https://www.reddit.com/r/example/comments/abc123/title/"},content:{body:"x",body_format:"html"}} as Draft),/body_format must be plain or markdown/);
+});
+
+
+test("Reddit reply controls are bound to the exact target comment, not nested replies",()=>{
+  assert.equal(redditCommentControlMatchesTarget("t1_p6exuss","t1_p6exuss"),true);
+  assert.equal(redditCommentControlMatchesTarget("t1_p6gz5h8","t1_p6exuss"),false);
+  assert.equal(redditCommentControlMatchesTarget(undefined,"t1_p6exuss"),false);
 });
