@@ -548,27 +548,36 @@ export class RedditBrowserAdapter implements Adapter {
     let target = field;
     const initialTag = await target.evaluate(element => element.tagName.toLowerCase()).catch(() => "");
     if (initialTag !== "textarea") {
-      let toggle = await this.findAny(scope, ["button", "link"], ui.markdown);
-      if (!toggle) {
-        const cssCandidates = scope.locator('button[aria-label*="markdown" i],button[slot="top-toolbar-right"]');
-        const matches: Locator[] = [];
-        for (let i = 0; i < await cssCandidates.count(); i += 1) {
-          const item = cssCandidates.nth(i);
-          if (!await item.isVisible().catch(() => false)) continue;
-          const label = `${await item.innerText().catch(() => "")} ${await item.getAttribute("aria-label").catch(() => "") ?? ""}`.trim();
-          if (/markdown/i.test(label)) matches.push(item);
+      const page = "page" in scope ? scope.page() : scope;
+      let toggle: Locator | undefined;
+      for (let attempt = 0; attempt < 20 && !toggle; attempt += 1) {
+        toggle = await this.findAny(scope, ["button", "link"], ui.markdown);
+        if (!toggle) {
+          const cssCandidates = scope.locator('button[aria-label*="markdown" i],button[slot="top-toolbar-right"]');
+          const matches: Locator[] = [];
+          for (let i = 0; i < await cssCandidates.count(); i += 1) {
+            const item = cssCandidates.nth(i);
+            if (!await item.isVisible().catch(() => false)) continue;
+            const label = `${await item.innerText().catch(() => "")} ${await item.getAttribute("aria-label").catch(() => "") ?? ""}`.trim();
+            if (/markdown/i.test(label)) matches.push(item);
+          }
+          if (matches.length === 1) toggle = matches[0];
+          if (matches.length > 1) throw new Error(`AMBIGUOUS_TARGET: expected one Reddit Markdown toggle, found ${matches.length}`);
         }
-        if (matches.length === 1) toggle = matches[0];
-        if (matches.length > 1) throw new Error(`AMBIGUOUS_TARGET: expected one Reddit Markdown toggle, found ${matches.length}`);
+        if (!toggle && attempt < 19) await page.waitForTimeout(500);
       }
       if (!toggle) throw new PublisherError("REDDIT_MARKDOWN_UNAVAILABLE", "Reddit is showing a rich-text editor but no Markdown Editor control was found. Nothing was published; use plain formatting or inspect the current Reddit editor UI.");
       await toggle.click();
-      const page = "page" in scope ? scope.page() : scope;
-      await page.waitForTimeout(300);
       const textareas = scope.locator('textarea[name="body"],textarea[name="textarea"],textarea');
-      const count = await this.visibleCount(textareas);
-      if (count !== 1) throw new Error(`SITE_CHANGED: expected one Markdown textarea after switching editor, found ${count}`);
-      target = textareas.filter({ visible: true }).first();
+      let markdownField: Locator | undefined;
+      for (let attempt = 0; attempt < 20 && !markdownField; attempt += 1) {
+        const count = await this.visibleCount(textareas);
+        if (count === 1) markdownField = textareas.filter({ visible: true }).first();
+        else if (count > 1) throw new Error(`AMBIGUOUS_TARGET: expected one Markdown textarea after switching editor, found ${count}`);
+        else if (attempt < 19) await page.waitForTimeout(500);
+      }
+      if (!markdownField) throw new Error("SITE_CHANGED: Markdown textarea did not appear after switching editor");
+      target = markdownField;
     }
     const finalTag = await target.evaluate(element => element.tagName.toLowerCase()).catch(() => "");
     if (finalTag !== "textarea") throw new PublisherError("REDDIT_MARKDOWN_UNAVAILABLE", "Reddit did not expose a Markdown textarea after switching editor. Nothing was published.");
