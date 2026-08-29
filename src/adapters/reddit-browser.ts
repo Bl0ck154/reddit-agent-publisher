@@ -42,6 +42,12 @@ export function redditCommentControlMatchesTarget(ownerFullname: string | undefi
   return ownerFullname === targetFullname;
 }
 
+export function approvedCommentFieldAction(current: string | undefined, expected: string): "keep" | "restore" | "stale" {
+  if (current === expected) return "keep";
+  if (!current) return "restore";
+  return "stale";
+}
+
 export function detectRedditTargetUnavailableText(text: string): string | undefined {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (/\bPage not found\b/i.test(normalized)) return "page_not_found";
@@ -336,6 +342,7 @@ export class RedditBrowserAdapter implements Adapter {
       if (!s || s.page.isClosed()) throw new Error("APPROVAL_STALE: Reddit browser preview no longer exists; create a new preview and approval");
       if (s.action !== d.action || s.page.url() !== s.pageUrl) throw new Error("APPROVAL_STALE: Reddit page/action changed after preview");
       this.assertOrigin(s.page.url());
+      if (d.action === "create_comment") await this.rebindCommentSession(d, s);
       await this.verifyForm(s);
       const before = s.page.url();
       if (d.action === "delete") {
@@ -453,8 +460,8 @@ export class RedditBrowserAdapter implements Adapter {
     if (id.commentId) {
       const reply = await this.needUniqueDirectCommentControl(scope, id.fullname, ["button"], ui.comment);
       await reply.click();
-      bodyField = await this.needUniqueTextbox(scope, [/comment/i, /reply/i, /коментар/i, /відповід/i, /ответ/i])
-        .catch(() => this.needUniqueTextbox(page, [/comment/i, /reply/i, /коментар/i, /відповід/i, /ответ/i]));
+      bodyField = await this.needUniqueDirectCommentTextbox(scope, id.fullname);
+      bodyScope = await this.commentComposerScope(bodyField, scope);
     } else {
       const composer = await this.postCommentComposer(page, id);
       bodyScope = composer;
@@ -485,6 +492,49 @@ export class RedditBrowserAdapter implements Adapter {
     const form = await this.formFor(page, bodyField);
     const submit = await this.needUniqueAny(form, ["button"], ui.save);
     return { page, action: d.action, pageUrl: page.url(), targetIdentity: id.fullname, targetScope: scope, submit, bodyField, body: String(d.content.body) };
+  }
+
+  private async rebindCommentSession(d: Draft, s: PreviewSession): Promise<void> {
+    const id = this.permalink(String(d.target.url));
+    if (!id.commentId) {
+      const composer = await this.postCommentComposer(s.page, id);
+      let field = await this.needUniqueTextbox(composer, [/comment/i, /reply/i, /коментар/i, /відповід/i, /ответ/i]);
+      const expected = String(d.content.body);
+      const current = await this.fieldValue(field).catch(() => undefined);
+      const action = approvedCommentFieldAction(current, expected);
+      if (action === "stale") throw new Error("APPROVAL_STALE: body/comment changed after preview");
+      if (action === "restore") field = await this.fillRedditBody(composer, field, expected, this.bodyFormat(d));
+      s.targetScope = composer;
+      s.bodyField = field;
+      s.submit = await this.commentSubmit(composer);
+      s.body = expected;
+      return;
+    }
+
+    const scope = await this.targetScope(s.page, id);
+    let field = await this.findDirectCommentTextbox(scope, id.fullname, 2);
+    const expected = String(d.content.body);
+    if (field) {
+      const current = await this.fieldValue(field).catch(() => undefined);
+      if (approvedCommentFieldAction(current, expected) === "stale") throw new Error("APPROVAL_STALE: body/comment changed after preview");
+    }
+    if (!field) {
+      const reply = await this.needUniqueDirectCommentControl(scope, id.fullname, ["button"], ui.comment);
+      await reply.click();
+      field = await this.needUniqueDirectCommentTextbox(scope, id.fullname);
+    }
+    let composer = await this.commentComposerScope(field, scope);
+    const current = await this.fieldValue(field).catch(() => undefined);
+    const action = approvedCommentFieldAction(current, expected);
+    if (action === "stale") throw new Error("APPROVAL_STALE: body/comment changed after preview");
+    if (action === "restore") {
+      field = await this.fillRedditBody(composer, field, expected, this.bodyFormat(d));
+      composer = await this.commentComposerScope(field, scope);
+    }
+    s.targetScope = scope;
+    s.bodyField = field;
+    s.submit = await this.commentSubmit(composer);
+    s.body = expected;
   }
 
   private async verifyForm(s: PreviewSession): Promise<void> {
@@ -864,6 +914,57 @@ export class RedditBrowserAdapter implements Adapter {
     throw new Error(`SITE_CHANGED: direct semantic control for ${targetFullname} not found`);
   }
 
+
+  private async findDirectCommentTextbox(scope: Locator, targetFullname: string, attempts = 1): Promise<Locator | undefined> {
+    const page = scope.page();
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const candidates = scope.locator('textarea,[data-lexical-editor="true"],[contenteditable="true"],[role="textbox"]');
+      const direct: Locator[] = [];
+      for (let i = 0; i < await candidates.count(); i += 1) {
+        const item = candidates.nth(i);
+        if (!await item.isVisible().catch(() => false)) continue;
+        const editable = await item.evaluate(element => {
+          const tag = element.tagName.toLowerCase();
+          return tag === "textarea" || element.getAttribute("contenteditable") === "true" || element.getAttribute("role") === "textbox";
+        }).catch(() => false);
+        if (!editable) continue;
+        const ownerFullname = await item.evaluate(element => {
+          const comment = element.closest("shreddit-comment");
+          return comment?.getAttribute("thingid")
+            ?? comment?.getAttribute("id")
+            ?? comment?.getAttribute("data-fullname")
+            ?? undefined;
+        }).catch(() => undefined);
+        if (redditCommentControlMatchesTarget(ownerFullname, targetFullname)) direct.push(item);
+      }
+      if (direct.length === 1) return direct[0];
+      if (direct.length > 1) throw new Error(`AMBIGUOUS_TARGET: multiple direct comment editors for ${targetFullname}`);
+      if (attempt < attempts - 1) await page.waitForTimeout(250);
+    }
+    return undefined;
+  }
+
+  private async needUniqueDirectCommentTextbox(scope: Locator, targetFullname: string): Promise<Locator> {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const field = await this.findDirectCommentTextbox(scope, targetFullname);
+      if (field) return field;
+      if (attempt < 19) await scope.page().waitForTimeout(250);
+    }
+    throw new Error(`SITE_CHANGED: direct comment editor for ${targetFullname} not found`);
+  }
+
+  private async commentComposerScope(field: Locator, fallback: Locator): Promise<Locator> {
+    for (const selector of [
+      'xpath=ancestor::shreddit-composer[1]',
+      'xpath=ancestor::faceplate-form[1]',
+      'xpath=ancestor::comment-composer-host[1]',
+    ]) {
+      const candidate = field.locator(selector);
+      if (await candidate.count().catch(() => 0) === 1) return candidate.first();
+    }
+    return fallback;
+  }
+
   private async needUniqueTextbox(scope: Page | Locator, names: RegExp[], exclude?: Locator): Promise<Locator> {
     const joined = names.map(String).join(" ");
     for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -941,7 +1042,10 @@ export class RedditBrowserAdapter implements Adapter {
     return n;
   }
 
-  private async fieldValue(x: Locator): Promise<string> { return await x.inputValue().catch(async () => await x.innerText()); }
+  private async fieldValue(x: Locator): Promise<string> {
+    if (await x.count().catch(() => 0) !== 1) throw new Error("APPROVAL_STALE: exact Reddit editor disappeared after preview");
+    return await x.inputValue({ timeout: 1_500 }).catch(async () => await x.innerText({ timeout: 1_500 }));
+  }
   private async waitPostCommitted(s: PreviewSession, before: string): Promise<void> {
     const deadline = Date.now() + 20_000;
     let resetSince = 0;

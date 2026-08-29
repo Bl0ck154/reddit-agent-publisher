@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { canonicalRedditPublishedPostUrl, detectRedditTargetUnavailableText, extractCommunityRulesText, formatSubredditRulesPayload, normalizeFlairOptions, redditCommentControlMatchesTarget, RedditBrowserAdapter } from "../adapters/reddit-browser.js";
+import { approvedCommentFieldAction, canonicalRedditPublishedPostUrl, detectRedditTargetUnavailableText, extractCommunityRulesText, formatSubredditRulesPayload, normalizeFlairOptions, redditCommentControlMatchesTarget, RedditBrowserAdapter } from "../adapters/reddit-browser.js";
 import type { Config } from "../config.js";
 import type { Draft } from "../types.js";
 
@@ -110,4 +110,12 @@ test("Reddit reply controls are bound to the exact target comment, not nested re
   assert.equal(redditCommentControlMatchesTarget("t1_p6exuss","t1_p6exuss"),true);
   assert.equal(redditCommentControlMatchesTarget("t1_p6gz5h8","t1_p6exuss"),false);
   assert.equal(redditCommentControlMatchesTarget(undefined,"t1_p6exuss"),false);
+});
+
+
+test("Reddit approved reply restores a disappeared or reset composer without accepting changed text",()=>{
+  assert.equal(approvedCommentFieldAction("approved body","approved body"),"keep");
+  assert.equal(approvedCommentFieldAction("","approved body"),"restore");
+  assert.equal(approvedCommentFieldAction(undefined,"approved body"),"restore");
+  assert.equal(approvedCommentFieldAction("different body","approved body"),"stale");
 });
