@@ -38,6 +38,21 @@ export function normalizeFlairOptions(values: string[]): string[] {
   });
 }
 
+export function inferRedditBodyFormat(body: string): "plain" | "markdown" {
+  const patterns = [
+    /(^|[^\\])\*\*(?=\S)[\s\S]*?\S\*\*/m,
+    /(^|[^\\])__(?=\S)[\s\S]*?\S__/m,
+    /(^|[^\\])~~(?=\S)[\s\S]*?\S~~/m,
+    /(^|\n)\s{0,3}#{1,6}\s+\S/m,
+    /(^|\n)\s*>\s+\S/m,
+    /(^|\n)\s*(?:[-+*]|\d+\.)\s+\S/m,
+    /\[[^\]\n]+\]\(https?:\/\/[^)\s]+\)/i,
+    /(^|[^\\])`[^`\n]+`/m,
+    /(^|[^\\])>![\s\S]+?!</m,
+  ];
+  return patterns.some(pattern => pattern.test(body)) ? "markdown" : "plain";
+}
+
 export function redditCommentControlMatchesTarget(ownerFullname: string | undefined, targetFullname: string): boolean {
   return ownerFullname === targetFullname;
 }
@@ -589,8 +604,9 @@ export class RedditBrowserAdapter implements Adapter {
   }
 
   private bodyFormat(d: Draft): "plain" | "markdown" {
-    const format = String(d.content.body_format ?? "plain").toLowerCase();
-    if (format !== "plain" && format !== "markdown") throw new PublisherError("REDDIT_BODY_FORMAT_INVALID", "Reddit body_format must be plain or markdown.");
+    const format = String(d.content.body_format ?? "auto").toLowerCase();
+    if (format === "auto") return inferRedditBodyFormat(String(d.content.body ?? ""));
+    if (format !== "plain" && format !== "markdown") throw new PublisherError("REDDIT_BODY_FORMAT_INVALID", "Reddit body_format must be auto, plain or markdown.");
     return format;
   }
 

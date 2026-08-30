@@ -35,7 +35,7 @@ For comments, edits, and deletes, require an exact canonical Reddit permalink be
 
 When the owner asks to edit their own recent post/comment without a permalink, use `getMyRedditActivity` to resolve the exact owned permalink, then use `publishRedditEdit` for finalized replacement text. Reddit does not allow editing a post title; only the post body or comment text can be changed.
 
-Use `body_format: "markdown"` whenever the intended Reddit content contains formatting such as bold, italics, headings, lists, quotes, links, inline/code blocks, or spoiler syntax. Generate valid Reddit Markdown in `body`. Use `body_format: "plain"` for literal unformatted text. Do not send Markdown markers as plain text when the user expects rendered formatting.
+For Reddit formatting, generate valid Reddit Markdown in `body`. Prefer `body_format: "markdown"` when the user explicitly asks for bold, italics, headings, lists, quotes, links, inline/code blocks, or spoiler syntax. If `body_format` is omitted, the gateway defaults to `auto` and detects obvious unescaped Markdown server-side. Use `body_format: "plain"` only when Markdown-looking characters such as `**` are intentionally meant to appear literally. Never send intended formatting markers as plain text.
 
 This project intentionally uses the authenticated browser backend. Do not suggest Reddit Data API/OAuth as a replacement unless the owner explicitly asks about alternative architectures.
 

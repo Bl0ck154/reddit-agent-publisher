@@ -21,7 +21,7 @@ const MAX_REQUESTS = 60;
 const MAX_BODY = 64 * 1024;
 
 const Account = z.string().min(1).max(80).default("default");
-const BodyFormat = z.enum(["plain","markdown"]).default("plain");
+const BodyFormat = z.enum(["auto","plain","markdown"]).default("auto");
 const GptFileRef = z.union([z.string(),z.object({name:z.string().optional(),id:z.string().optional(),mime_type:z.string().optional(),download_link:z.string().url()}).passthrough()]);
 const RedditPost = z.object({ subreddit:z.string().min(2).max(21),title:z.string().min(1).max(300),body:z.string().max(40_000).optional(),body_format:BodyFormat,url:z.string().url().optional(),flair:z.string().max(200).optional(),openaiFileIdRefs:z.array(GptFileRef).min(1).max(4).optional(),account:Account.optional() }).strict()
   .refine(value=>!(value.url && value.openaiFileIdRefs?.length),{message:"A Reddit post cannot contain both a link URL and uploaded images."});

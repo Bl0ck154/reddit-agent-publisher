@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { approvedCommentFieldAction, canonicalRedditPublishedPostUrl, detectRedditTargetUnavailableText, extractCommunityRulesText, formatSubredditRulesPayload, normalizeFlairOptions, redditCommentControlMatchesTarget, RedditBrowserAdapter } from "../adapters/reddit-browser.js";
+import { approvedCommentFieldAction, canonicalRedditPublishedPostUrl, detectRedditTargetUnavailableText, extractCommunityRulesText, formatSubredditRulesPayload, inferRedditBodyFormat, normalizeFlairOptions, redditCommentControlMatchesTarget, RedditBrowserAdapter } from "../adapters/reddit-browser.js";
 import type { Config } from "../config.js";
 import type { Draft } from "../types.js";
 
@@ -99,10 +99,16 @@ test("Reddit unavailable-page text is classified separately from UI changes",()=
   assert.equal(detectRedditTargetUnavailableText("Normal live Reddit post"),undefined);
 });
 
-test("Reddit body_format accepts markdown and rejects unknown modes",async()=>{
+test("Reddit body_format supports auto detection and rejects unknown modes",async()=>{
   const a=new RedditBrowserAdapter(config);
   await a.validate({...base,adapter:"reddit",action:"create_comment",target:{url:"https://www.reddit.com/r/example/comments/abc123/title/"},content:{body:"**bold**",body_format:"markdown"}} as Draft);
-  await assert.rejects(()=>a.validate({...base,adapter:"reddit",action:"create_comment",target:{url:"https://www.reddit.com/r/example/comments/abc123/title/"},content:{body:"x",body_format:"html"}} as Draft),/body_format must be plain or markdown/);
+  await a.validate({...base,adapter:"reddit",action:"create_comment",target:{url:"https://www.reddit.com/r/example/comments/abc123/title/"},content:{body:"**bold**",body_format:"auto"}} as Draft);
+  await assert.rejects(()=>a.validate({...base,adapter:"reddit",action:"create_comment",target:{url:"https://www.reddit.com/r/example/comments/abc123/title/"},content:{body:"x",body_format:"html"}} as Draft),/body_format must be auto, plain or markdown/);
+  assert.equal(inferRedditBodyFormat("Normal text"),"plain");
+  assert.equal(inferRedditBodyFormat("Make **this part** bold"),"markdown");
+  assert.equal(inferRedditBodyFormat("\\*\\*literal stars\\*\\*"),"plain");
+  assert.equal(inferRedditBodyFormat("- first\n- second"),"markdown");
+  assert.equal(inferRedditBodyFormat("[OpenAI](https://openai.com)"),"markdown");
 });
 
 
