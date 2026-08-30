@@ -104,14 +104,45 @@ test("Reddit body_format supports auto detection and rejects unknown modes",asyn
   await a.validate({...base,adapter:"reddit",action:"create_comment",target:{url:"https://www.reddit.com/r/example/comments/abc123/title/"},content:{body:"**bold**",body_format:"markdown"}} as Draft);
   await a.validate({...base,adapter:"reddit",action:"create_comment",target:{url:"https://www.reddit.com/r/example/comments/abc123/title/"},content:{body:"**bold**",body_format:"auto"}} as Draft);
   await assert.rejects(()=>a.validate({...base,adapter:"reddit",action:"create_comment",target:{url:"https://www.reddit.com/r/example/comments/abc123/title/"},content:{body:"x",body_format:"html"}} as Draft),/body_format must be auto, plain or markdown/);
-  assert.equal(inferRedditBodyFormat("Normal text"),"plain");
-  assert.equal(inferRedditBodyFormat("Make **this part** bold"),"markdown");
-  assert.equal(inferRedditBodyFormat("\\*\\*literal stars\\*\\*"),"plain");
-  assert.equal(inferRedditBodyFormat("- first\n- second"),"markdown");
-  assert.equal(inferRedditBodyFormat("[OpenAI](https://openai.com)"),"markdown");
+  const plainSamples = [
+    "Normal text",
+    "\\*\\*literal stars\\*\\*",
+    "__init__",
+    "__name__ == \"__main__\"",
+    "foo__bar__baz",
+    "file_name__backup__2026",
+    "2 ** 3",
+    "a**b**c",
+    "> 10",
+    "line1\n> 10\nline3",
+    "- 5 degrees",
+    "line1\n- note\nline3",
+    "# heading-looking text",
+    "#hashtag",
+    "x > 10",
+    "C:\\path\\**\\file",
+    "regex: ^foo.*bar$",
+    "price ~~ old ~~ maybe",
+    "some__token__value",
+  ];
+  for (const sample of plainSamples) assert.equal(inferRedditBodyFormat(sample),"plain",sample);
+
+  const markdownSamples = [
+    "Make **this part** bold",
+    "**bold**",
+    "Make *this part* italic",
+    "Use ~~strike~~ here",
+    "[OpenAI](https://openai.com)",
+    "```js\nconsole.log('x')\n```",
+    "Hide >!spoiler!< please",
+  ];
+  for (const sample of markdownSamples) assert.equal(inferRedditBodyFormat(sample),"markdown",sample);
+
   assert.equal(resolveRedditBodyFormat(undefined,"Make **this part** bold"),"markdown");
-  assert.equal(resolveRedditBodyFormat("plain","Make **this part** bold"),"markdown");
+  assert.throws(()=>resolveRedditBodyFormat("plain","Make **this part** bold"),/REDDIT_BODY_FORMAT_CONFLICT|conflicts with high-confidence Markdown markers/);
+  assert.equal(resolveRedditBodyFormat("plain","__init__"),"plain");
   assert.equal(resolveRedditBodyFormat("plain","Normal text"),"plain");
+  assert.equal(resolveRedditBodyFormat("plain","\\*\\*literal stars\\*\\*"),"plain");
   assert.equal(resolveRedditBodyFormat("markdown","Normal text"),"markdown");
 });
 

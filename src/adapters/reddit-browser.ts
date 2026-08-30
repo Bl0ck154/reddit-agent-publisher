@@ -39,16 +39,20 @@ export function normalizeFlairOptions(values: string[]): string[] {
 }
 
 export function inferRedditBodyFormat(body: string): "plain" | "markdown" {
+  // Auto-detection is intentionally conservative. It exists only as a safety
+  // net when GPT forgets body_format, not as a full Markdown parser. Avoid
+  // line-prefix syntax here because ordinary technical text can legitimately
+  // begin with "- ", "> ", or "# ", and avoid underscore emphasis because
+  // identifiers such as __init__ / foo__bar__ are common in code.
+  const boundaryBefore = String.raw`(^|[\s([{\"'“‘])`;
+  const boundaryAfter = String.raw`(?=$|[\s.,!?;:)\]}\"'”’])`;
   const patterns = [
-    /(^|[^\\])\*\*(?=\S)[\s\S]*?\S\*\*/m,
-    /(^|[^\\])__(?=\S)[\s\S]*?\S__/m,
-    /(^|[^\\])~~(?=\S)[\s\S]*?\S~~/m,
-    /(^|\n)\s{0,3}#{1,6}\s+\S/m,
-    /(^|\n)\s*>\s+\S/m,
-    /(^|\n)\s*(?:[-+*]|\d+\.)\s+\S/m,
-    /\[[^\]\n]+\]\(https?:\/\/[^)\s]+\)/i,
-    /(^|[^\\])`[^`\n]+`/m,
-    /(^|[^\\])>![\s\S]+?!</m,
+    new RegExp(`${boundaryBefore}\\*\\*(?=\\S)(?:(?!\\*\\*)[\\s\\S])*?\\S\\*\\*${boundaryAfter}`, "m"),
+    new RegExp(`${boundaryBefore}\\*(?=\\S)(?:(?!\\*)[^\\n])*?\\S\\*${boundaryAfter}`, "m"),
+    new RegExp(`${boundaryBefore}~~(?=\\S)(?:(?!~~)[\\s\\S])*?\\S~~${boundaryAfter}`, "m"),
+    /\[[^\]\n]{1,200}\]\(https?:\/\/[^)\s]+\)/i,
+    /(^|\n)```[^\n]*\n[\s\S]*?\n```(?=$|\n)/m,
+    new RegExp(`${boundaryBefore}>!(?=\\S)[\\s\\S]*?\\S!<${boundaryAfter}`, "m"),
   ];
   return patterns.some(pattern => pattern.test(body)) ? "markdown" : "plain";
 }
@@ -57,7 +61,15 @@ export function resolveRedditBodyFormat(requested: unknown, body: string): "plai
   const format = String(requested ?? "auto").toLowerCase();
   const inferred = inferRedditBodyFormat(body);
   if (format === "auto") return inferred;
-  if (format === "plain") return inferred === "markdown" ? "markdown" : "plain";
+  if (format === "plain") {
+    if (inferred === "markdown") {
+      throw new PublisherError(
+        "REDDIT_BODY_FORMAT_CONFLICT",
+        "Reddit body_format=plain conflicts with high-confidence Markdown markers. Nothing was published; use body_format=markdown for rendered formatting, or escape the markers if they must remain literal.",
+      );
+    }
+    return "plain";
+  }
   if (format === "markdown") return "markdown";
   throw new PublisherError("REDDIT_BODY_FORMAT_INVALID", "Reddit body_format must be auto, plain or markdown.");
 }
