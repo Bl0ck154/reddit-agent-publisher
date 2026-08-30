@@ -53,6 +53,15 @@ export function inferRedditBodyFormat(body: string): "plain" | "markdown" {
   return patterns.some(pattern => pattern.test(body)) ? "markdown" : "plain";
 }
 
+export function resolveRedditBodyFormat(requested: unknown, body: string): "plain" | "markdown" {
+  const format = String(requested ?? "auto").toLowerCase();
+  const inferred = inferRedditBodyFormat(body);
+  if (format === "auto") return inferred;
+  if (format === "plain") return inferred === "markdown" ? "markdown" : "plain";
+  if (format === "markdown") return "markdown";
+  throw new PublisherError("REDDIT_BODY_FORMAT_INVALID", "Reddit body_format must be auto, plain or markdown.");
+}
+
 export function redditCommentControlMatchesTarget(ownerFullname: string | undefined, targetFullname: string): boolean {
   return ownerFullname === targetFullname;
 }
@@ -604,10 +613,7 @@ export class RedditBrowserAdapter implements Adapter {
   }
 
   private bodyFormat(d: Draft): "plain" | "markdown" {
-    const format = String(d.content.body_format ?? "auto").toLowerCase();
-    if (format === "auto") return inferRedditBodyFormat(String(d.content.body ?? ""));
-    if (format !== "plain" && format !== "markdown") throw new PublisherError("REDDIT_BODY_FORMAT_INVALID", "Reddit body_format must be auto, plain or markdown.");
-    return format;
+    return resolveRedditBodyFormat(d.content.body_format, String(d.content.body ?? ""));
   }
 
   private async fillRedditBody(scope: Page | Locator, field: Locator, body: string, format: "plain" | "markdown"): Promise<Locator> {

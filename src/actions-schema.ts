@@ -1,7 +1,7 @@
 export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
   const server = baseUrl.replace(/\/$/, "");
   const account = { type: "string", default: "default", description: "Publisher account id. Usually leave as default." };
-  const bodyFormat = { type: "string", enum: ["auto", "plain", "markdown"], default: "auto", description: "Usually leave as auto. Auto detects unescaped Reddit Markdown such as **bold**, *italic*, lists, quotes, links, code or spoilers and switches to Markdown editor when needed. Use markdown to force rendered formatting. Use plain only when Markdown-looking characters must remain literal text." };
+  const bodyFormat = { type: "string", enum: ["auto", "plain", "markdown"], default: "auto", description: "Usually leave as auto. Auto detects obvious unescaped Reddit Markdown and switches to Markdown editor when needed. Markdown forces rendered formatting. Plain is only for ordinary literal text; if obvious unescaped Markdown such as **bold**, lists, quotes, links, code or spoilers is present, the publisher upgrades it to Markdown to prevent accidental visible markup characters." };
   const okResponse = {
     description: "Action result",
     content: { "application/json": { schema: { $ref: "#/components/schemas/ActionResult" } } },

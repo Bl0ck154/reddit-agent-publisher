@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { approvedCommentFieldAction, canonicalRedditPublishedPostUrl, detectRedditTargetUnavailableText, extractCommunityRulesText, formatSubredditRulesPayload, inferRedditBodyFormat, normalizeFlairOptions, redditCommentControlMatchesTarget, RedditBrowserAdapter } from "../adapters/reddit-browser.js";
+import { approvedCommentFieldAction, canonicalRedditPublishedPostUrl, detectRedditTargetUnavailableText, extractCommunityRulesText, formatSubredditRulesPayload, inferRedditBodyFormat, normalizeFlairOptions, redditCommentControlMatchesTarget, RedditBrowserAdapter, resolveRedditBodyFormat } from "../adapters/reddit-browser.js";
 import type { Config } from "../config.js";
 import type { Draft } from "../types.js";
 
@@ -109,6 +109,10 @@ test("Reddit body_format supports auto detection and rejects unknown modes",asyn
   assert.equal(inferRedditBodyFormat("\\*\\*literal stars\\*\\*"),"plain");
   assert.equal(inferRedditBodyFormat("- first\n- second"),"markdown");
   assert.equal(inferRedditBodyFormat("[OpenAI](https://openai.com)"),"markdown");
+  assert.equal(resolveRedditBodyFormat(undefined,"Make **this part** bold"),"markdown");
+  assert.equal(resolveRedditBodyFormat("plain","Make **this part** bold"),"markdown");
+  assert.equal(resolveRedditBodyFormat("plain","Normal text"),"plain");
+  assert.equal(resolveRedditBodyFormat("markdown","Normal text"),"markdown");
 });
 
 
