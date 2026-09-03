@@ -8,7 +8,7 @@ import { rpc } from "./rpc.js";
 const socket = loadConfig().socketPath;
 const server = new McpServer({ name:"reddit-agent-publisher", version:"0.2.0" });
 const run = async (method:string, params:any) => { const r=await rpc(socket,method,{...params,actor:"mcp"}); return { content:[{type:"text" as const,text:JSON.stringify(r)}], structuredContent:r as any, isError:!r.ok }; };
-const account = z.string().default("default");
+const account = z.string().default("default").describe("Internal Publisher browser-profile id, not the Reddit username. Usually omit it or leave default; use another value only when it is a configured Publisher profile id returned by status.");
 const redditUrl = z.string().url();
 
 server.registerTool("publication_prepare", { description:"Prepare exactly one owner-requested draft. This never publishes. Kept for compatibility; prefer the typed Reddit tools.", inputSchema:{ adapter:z.enum(["reddit"]),account,action:z.enum(["create_post","create_comment","edit","delete"]),target:z.record(z.unknown()),content:z.record(z.unknown()),owner_command:z.literal(true) } }, p=>run("prepare",{input:p}));
