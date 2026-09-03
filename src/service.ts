@@ -185,8 +185,14 @@ export class PublisherService {
   private needDraft(id: string): Draft { const d = this.store.getDraft(id); if (!d) throw new Error("DRAFT_NOT_FOUND"); return d; }
   private assertState(d: Draft, states: DraftState[]): void { if (!states.includes(DraftState.parse(d.state))) throw new Error(`INVALID_STATE: expected ${states.join("/")}, got ${d.state}`); }
   private effectiveAccount(adapter:string,account:string):string {
-    if (account === "default" || account === "reddit-main" || account === "owner-main") return this.config.defaultAccount;
-    return account;
+    const requested = String(account || "default").trim();
+    if (requested === "default" || requested === "reddit-main" || requested === "owner-main") return this.config.defaultAccount;
+    const aliases = this.config.accountAliases ?? {};
+    const exact = aliases[requested];
+    if (exact) return exact;
+    const lower = requested.toLowerCase();
+    const match = Object.entries(aliases).find(([key]) => key.toLowerCase() === lower)?.[1];
+    return match ?? requested;
   }
   private withEffectiveAccount(d:Draft):Draft { return {...d,account:this.effectiveAccount(d.adapter,d.account)}; }
   private fail(e: Error, draftId?: string): ResultEnvelope {

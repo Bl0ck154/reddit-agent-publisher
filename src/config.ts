@@ -15,6 +15,7 @@ export interface Config {
   actionsPort: number;
   actionsPublicBaseUrl?: string;
   defaultAccount: string;
+  accountAliases?: Record<string,string>;
   /** Optional portable mode: attach to an already-running local Chrome CDP endpoint instead of managing a systemd browser unit. */
   cdpUrl?: string;
   /** systemd user-unit prefix used by managed browser mode. */
@@ -27,6 +28,13 @@ export function loadConfig(): Config {
   let file: Record<string, any> = {};
   if (fs.existsSync(configPath)) file = JSON.parse(fs.readFileSync(configPath, "utf8"));
   const cdpUrl = process.env.PUBLISHER_CDP_URL ?? file.cdpUrl;
+  let envAliases: Record<string, Record<string,string>> = {};
+  const aliasesJson = process.env.PUBLISHER_ACCOUNT_ALIASES_JSON;
+  if (aliasesJson) {
+    try { envAliases = JSON.parse(aliasesJson); }
+    catch { throw new Error("PUBLISHER_ACCOUNT_ALIASES_JSON must be valid JSON"); }
+  }
+  const accountAliases = { ...(file.accountAliases?.reddit ?? file.accountAliases ?? {}), ...(envAliases.reddit ?? {}) };
   return {
     stateDir,
     socketPath: process.env.PUBLISHER_SOCKET ?? file.socketPath ?? path.join(stateDir, "publisher.sock"),
@@ -40,6 +48,7 @@ export function loadConfig(): Config {
     actionsPort: Number(process.env.PUBLISHER_ACTIONS_PORT ?? file.actionsPort ?? 8791),
     actionsPublicBaseUrl: process.env.PUBLISHER_ACTIONS_PUBLIC_BASE_URL ?? file.actionsPublicBaseUrl,
     defaultAccount: String(process.env.PUBLISHER_DEFAULT_ACCOUNT ?? file.defaultAccount ?? "owner-main"),
+    accountAliases,
     cdpUrl: cdpUrl ? String(cdpUrl) : undefined,
     browserServicePrefix: String(process.env.PUBLISHER_BROWSER_SERVICE_PREFIX ?? file.browserServicePrefix ?? "reddit-agent-publisher-browser"),
   };

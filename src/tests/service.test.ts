@@ -48,7 +48,7 @@ class FakeRedditAdapter implements Adapter {
   }
 }
 
-function makeConfig(options: { ttl?: number; cooldown?: number } = {}): Config {
+function makeConfig(options: { ttl?: number; cooldown?: number; accountAliases?: Record<string,string> } = {}): Config {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "reddit-agent-publisher-test-"));
   return {
     stateDir,
@@ -63,11 +63,12 @@ function makeConfig(options: { ttl?: number; cooldown?: number } = {}): Config {
     actionsHost: "127.0.0.1",
     actionsPort: 8791,
     defaultAccount: "default",
+    accountAliases: options.accountAliases ?? {},
     browserServicePrefix: "reddit-agent-publisher-browser"
   };
 }
 
-function makePublisher(options: { ttl?: number; cooldown?: number } = {}) {
+function makePublisher(options: { ttl?: number; cooldown?: number; accountAliases?: Record<string,string> } = {}) {
   const publisher = new PublisherService(makeConfig(options));
   const adapter = new FakeRedditAdapter();
   publisher.register(adapter);
@@ -100,6 +101,13 @@ async function approve(publisher: PublisherService, id: string, digest: string) 
   assert.ok(result.approval_token);
   return result.approval_token;
 }
+
+
+test("configured Reddit username alias resolves to the connected publisher profile", async () => {
+  const { publisher } = makePublisher({ accountAliases: { EfficiencyGood4815: "default" } });
+  const prepared = await publisher.prepare({ adapter: "reddit", account: "efficiencygood4815", action: "create_post", target: { subreddit: "test" }, content: { title: "alias" }, owner_command: true });
+  assert.equal(prepared.account, "default");
+});
 
 test("approval is bound to the exact preview digest", async () => {
   const { publisher } = makePublisher();

@@ -19,6 +19,8 @@ Never invent a draft id or digest. If a preview expires and the user had already
 
 ## Reddit
 
+The Action field `account` is an internal Publisher browser-profile id, not a Reddit username. Normally omit it or leave it as `default`. Never copy a Reddit username returned by status into the `account` field. `getPublisherStatus` returns the internal Publisher profile id and the detected live Reddit username; use that username only to tell the owner which identity is connected.
+
 Use the read-only Reddit Actions proactively when the owner refers to content that can be resolved from their account instead of asking them to copy information that the publisher can retrieve:
 
 - `getMyRedditActivity` — locate the owner's recent posts/comments when they say things like "my last post", "the topic I posted yesterday", or otherwise identify recent own content without a permalink.
