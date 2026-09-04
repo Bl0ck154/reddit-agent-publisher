@@ -71,6 +71,24 @@ export function extractRedditChatToken(html: string): { token: string; expiresAt
   return { token, expiresAt: expires };
 }
 
+function parseStoredString(value: unknown): string | undefined {
+  const raw=text(value); if(!raw) return undefined;
+  try { const parsed=JSON.parse(raw); return typeof parsed === "string" && parsed.trim() ? parsed : raw; } catch { return raw; }
+}
+
+export function extractRedditChatLocalStorageCredentials(value: unknown): {token:string;userId:string;deviceId?:string} | undefined {
+  const kv=object(value) ?? {};
+  const userId=parseStoredString(kv["chat:matrix-user-id"]);
+  let token=parseStoredString(kv["chat:matrix-access-token"]);
+  if(!token){
+    const legacy=text(kv["chat:access-token"]);
+    if(legacy){ try { token=text(object(JSON.parse(legacy))?.token); } catch { /* malformed legacy entry */ } }
+  }
+  const deviceId=parseStoredString(kv["chat:matrix-device-id"]);
+  if(!userId || !MATRIX_USER.test(userId) || !token) return undefined;
+  return {token,userId,...(deviceId?{deviceId}:{})};
+}
+
 function jwtExpiryMs(token: string): number | undefined {
   try {
     const part = token.split(".")[1];
@@ -513,17 +531,26 @@ export class RedditChat {
     const redditSession = cookies.find(cookie=>cookie.name==="reddit_session")?.value;
     if (!redditSession) throw new Error("AUTH_REQUIRED: Reddit browser session is not logged in");
 
-    if (!force) {
-      const tokenV2 = cookies.find(cookie=>cookie.name==="token_v2")?.value;
-      if (tokenV2) {
-        try {
-          const me = object(await this.request(tokenV2, "/_matrix/client/v3/account/whoami", "GET"));
-          const userId = text(me?.user_id);
-          if (userId === expectedUserId) {
-            const value={token:tokenV2,userId,expiresAt:jwtExpiryMs(tokenV2)}; this.tokens.set(account,value); return {token:tokenV2,userId};
-          }
-        } catch { /* stale token_v2: mint a fresh Matrix token below */ }
-      }
+    // Prefer the established credentials Reddit Chat already stored in this browser.
+    // This avoids minting unnecessary new Matrix devices, which Reddit may trust less.
+    const stored = await this.browserStoredMatrixCredentials(page);
+    if (stored?.userId === expectedUserId) {
+      try {
+        const me=object(await this.request(stored.token,"/_matrix/client/v3/account/whoami","GET"));
+        const userId=text(me?.user_id);
+        if(userId===expectedUserId){const value={token:stored.token,userId,expiresAt:jwtExpiryMs(stored.token)}; this.tokens.set(account,value); return {token:stored.token,userId};}
+      } catch { /* stale browser Chat token: try token_v2/fresh mint below */ }
+    }
+
+    const tokenV2 = cookies.find(cookie=>cookie.name==="token_v2")?.value;
+    if (tokenV2) {
+      try {
+        const me = object(await this.request(tokenV2, "/_matrix/client/v3/account/whoami", "GET"));
+        const userId = text(me?.user_id);
+        if (userId === expectedUserId) {
+          const value={token:tokenV2,userId,expiresAt:jwtExpiryMs(tokenV2)}; this.tokens.set(account,value); return {token:tokenV2,userId};
+        }
+      } catch { /* stale token_v2: mint a fresh Matrix token below */ }
     }
 
     const userAgent = await page.evaluate(()=>navigator.userAgent).catch(()=>"Mozilla/5.0");
@@ -540,6 +567,16 @@ export class RedditChat {
     if (userId !== expectedUserId) throw new Error("AUTH_REQUIRED: Reddit Matrix identity does not match the current authenticated browser account");
     this.tokens.set(account,{token:minted.token,expiresAt:minted.expiresAt ?? jwtExpiryMs(minted.token),userId});
     return {token:minted.token,userId};
+  }
+
+  private async browserStoredMatrixCredentials(page: Page): Promise<{token:string;userId:string;deviceId?:string} | undefined> {
+    try {
+      const values=await page.evaluate(()=>{
+        const keys=["chat:matrix-user-id","chat:matrix-device-id","chat:matrix-access-token","chat:access-token"];
+        return Object.fromEntries(keys.map(key=>[key,localStorage.getItem(key) ?? ""]));
+      });
+      return extractRedditChatLocalStorageCredentials(values);
+    } catch { return undefined; }
   }
 
   private async browserMatrixUserId(page: Page): Promise<string> {

@@ -1,12 +1,50 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { extractRedditChatToken, findDirectRoomForPeer, isRedditChatRoomId, normalizeRedditChatMessages, normalizeRedditChatSync, normalizeRedditRecipientProfile, redditDirectRoomCreateBody, redditMatrixUserIdFromFullname, redditMatrixUserIdFromSelfProfile } from "../reddit-chat.js";
+import { extractRedditChatLocalStorageCredentials, extractRedditChatToken, findDirectRoomForPeer, isRedditChatRoomId, normalizeRedditChatMessages, normalizeRedditChatSync, normalizeRedditRecipientProfile, redditDirectRoomCreateBody, redditMatrixUserIdFromFullname, redditMatrixUserIdFromSelfProfile } from "../reddit-chat.js";
 
 test("Reddit Chat bootstrap token is extracted without persisting credentials",()=>{
   const parsed=extractRedditChatToken('<html><rs-app token="{&quot;token&quot;:&quot;abc.def.sig&quot;,&quot;expires&quot;:1770000000000}"></rs-app></html>');
   assert.equal(parsed.token,"abc.def.sig");
   assert.equal(parsed.expiresAt,1770000000000);
   assert.throws(()=>extractRedditChatToken("<html></html>"),/SITE_CHANGED/);
+});
+
+test("Reddit Chat established browser localStorage credentials are parsed without creating a new device",()=>{
+  const current=extractRedditChatLocalStorageCredentials({
+    "chat:matrix-user-id":JSON.stringify("@t2_me:reddit.com"),
+    "chat:matrix-device-id":JSON.stringify("device-123"),
+    "chat:matrix-access-token":JSON.stringify("jwt.current.token"),
+  });
+  assert.deepEqual(current,{token:"jwt.current.token",userId:"@t2_me:reddit.com",deviceId:"device-123"});
+  const legacy=extractRedditChatLocalStorageCredentials({"chat:matrix-user-id":"@t2_me:reddit.com","chat:access-token":JSON.stringify({token:"legacy.jwt"})});
+  assert.equal(legacy?.token,"legacy.jwt");
+  assert.equal(extractRedditChatLocalStorageCredentials({"chat:matrix-user-id":"@not-reddit:example.com","chat:matrix-access-token":"x"}),undefined);
+});
+
+test("Reddit Chat session prefers established browser credentials and rejects a mismatched stored sender",async()=>{
+  const makePage=(cookies:any[])=>({
+    url:()=>"https://www.reddit.com/",
+    context:()=>({cookies:async()=>cookies}),
+    evaluate:async()=>({}),
+  }) as any;
+
+  const established:any=new (await import("../reddit-chat.js")).RedditChat({} as any);
+  established.browserMatrixUserId=async()=>"@t2_me:reddit.com";
+  established.browserStoredMatrixCredentials=async()=>({token:"stored-token",userId:"@t2_me:reddit.com",deviceId:"established-device"});
+  const used:string[]=[];
+  established.request=async(token:string,path:string)=>{used.push(token); assert.equal(path,"/_matrix/client/v3/account/whoami"); return {user_id:"@t2_me:reddit.com"};};
+  const establishedSession=await established.session("owner-main",makePage([{name:"reddit_session",value:"r"},{name:"token_v2",value:"token-v2"}]),false);
+  assert.deepEqual(establishedSession,{token:"stored-token",userId:"@t2_me:reddit.com"});
+  assert.deepEqual(used,["stored-token"]);
+
+  const mismatched:any=new (await import("../reddit-chat.js")).RedditChat({} as any);
+  mismatched.browserMatrixUserId=async()=>"@t2_me:reddit.com";
+  mismatched.browserStoredMatrixCredentials=async()=>({token:"wrong-account-token",userId:"@t2_other:reddit.com"});
+  const usedFallback:string[]=[];
+  mismatched.request=async(token:string,path:string)=>{usedFallback.push(token); assert.equal(path,"/_matrix/client/v3/account/whoami"); return {user_id:"@t2_me:reddit.com"};};
+  const fallbackSession=await mismatched.session("owner-main",makePage([{name:"reddit_session",value:"r"},{name:"token_v2",value:"correct-token-v2"}]),false);
+  assert.deepEqual(fallbackSession,{token:"correct-token-v2",userId:"@t2_me:reddit.com"});
+  assert.deepEqual(usedFallback,["correct-token-v2"]);
 });
 
 test("Reddit Chat room ids are bound to reddit.com Matrix rooms",()=>{
