@@ -348,12 +348,17 @@ export class RedditChat {
             roomStatus = "joined";
             warnings.push("Reddit reported an existing direct room during room creation; reused it instead of creating a duplicate.");
           } else {
-            if (/^rate\.score_room_creation_limit(?:_ln)?$/i.test(redditErrorCode ?? "")) throw new Error(`RATE_LIMITED: Reddit Chat room creation is temporarily limited (${redditErrorCode})`);
+            if (/^rate\.score_(?:room_creation|invitation)_limit(?:_ln)?$/i.test(redditErrorCode ?? "")) throw new Error(`RATE_LIMITED: Reddit Chat room creation is temporarily limited (${redditErrorCode})`);
             if (redditErrorCode === "feature_gated") throw new Error("RECIPIENT_CHAT_UNAVAILABLE: Reddit has feature-gated starting this chat for the connected account");
             if (/HTTP 403|M_FORBIDDEN|forbidden/i.test(failure)) throw new Error("RECIPIENT_CHAT_UNAVAILABLE: Reddit does not allow starting a chat with this user");
             if (/^RATE_LIMITED:|^AUTH_REQUIRED:|Matrix authentication/i.test(failure)) throw error;
             const status = Number(error?.matrixStatus ?? failure.match(/Matrix returned HTTP (\d+)/i)?.[1] ?? 0);
-            if (status && status < 500 && status !== 408) throw error;
+            // A conflict can mean the direct room already appeared concurrently, so let
+            // the recovery lookup below prove that before failing. Other deterministic
+            // client errors indicate Reddit's contract changed; blind retries are unsafe.
+            if (status >= 400 && status < 500 && status !== 408 && status !== 409) {
+              throw new Error(`SITE_CHANGED: Reddit Chat room creation returned unrecognized HTTP ${status}${redditErrorCode ? ` (${redditErrorCode})` : ""}`);
+            }
             try {
               const serverRoom = await this.directRoomFromServer(session.token, peer);
               if (serverRoom) { roomId=serverRoom; roomStatus="joined"; }

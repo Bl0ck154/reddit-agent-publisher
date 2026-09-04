@@ -290,6 +290,27 @@ test("HTTP 503 after createRoom is recovered through sync before any retry can c
 });
 
 
+test("HTTP 409 room-creation conflict recovers the server direct room instead of retrying create",async()=>{
+  const chat:any=new (await import("../reddit-chat.js")).RedditChat({} as any);
+  chat.resolveRecipientProfile=async()=>({username:"TopCommenter",fullname:"t2_peer",matrix_user_id:"@t2_peer:reddit.com"});
+  chat.withMatrix=async(_account:string,work:any)=>work({token:"tok",userId:"@t2_me:reddit.com"});
+  chat.sync=async()=>({rooms:{join:{},invite:{}},account_data:{events:[]}});
+  let lookups=0;
+  chat.directRoomFromServer=async()=>{lookups+=1; return lookups===1 ? undefined : "!conflict-recovered:reddit.com";};
+  const calls:any[]=[];
+  chat.request=async(_token:string,path:string,method:string,body:any)=>{
+    calls.push({path,method,body});
+    if(path==="/_matrix/client/v3/createRoom"){const e:any=new Error("REDDIT_CHAT_FAILED: Matrix returned HTTP 409 M_UNKNOWN: conflict"); e.matrixStatus=409; e.matrixPayload={errcode:"M_UNKNOWN"}; throw e;}
+    if(path.includes("/send/m.room.message/")) return {event_id:"$event409"};
+    return {};
+  };
+  const result=await chat.sendDirectMessage("owner-main","TopCommenter","hello","t2_peer","txn-409");
+  assert.equal(result.room_id,"!conflict-recovered:reddit.com");
+  assert.equal(lookups,2);
+  assert.equal(calls.filter(c=>c.path==="/_matrix/client/v3/createRoom").length,1);
+  assert.equal(calls.filter(c=>c.path.includes("/send/m.room.message/")).length,1);
+});
+
 test("Reddit-specific room creation rate and feature-gate codes are classified safely",async()=>{
   const make=async(code:string)=>{
     const chat:any=new (await import("../reddit-chat.js")).RedditChat({} as any);
@@ -302,7 +323,10 @@ test("Reddit-specific room creation rate and feature-gate codes are classified s
   };
   await assert.rejects(()=>make("rate.score_room_creation_limit"),/RATE_LIMITED/);
   await assert.rejects(()=>make("rate.score_room_creation_limit_ln"),/RATE_LIMITED/);
+  await assert.rejects(()=>make("rate.score_invitation_limit"),/RATE_LIMITED/);
+  await assert.rejects(()=>make("rate.score_invitation_limit_ln"),/RATE_LIMITED/);
   await assert.rejects(()=>make("feature_gated"),/RECIPIENT_CHAT_UNAVAILABLE/);
+  await assert.rejects(()=>make("future_unknown_client_code"),/SITE_CHANGED/);
 });
 
 test("server room-list lookup reuses an inactive direct room before createRoom",async()=>{

@@ -66,6 +66,6 @@ test("unfinished Reddit DM mutation intent survives PublisherService restart",as
 
 
 test("terminal Reddit DM recipient/identity failures are final while auth/rate/network remain retryable",()=>{
-  for(const code of ["PUBLISH_RESULT_AMBIGUOUS","RECIPIENT_NOT_FOUND","RECIPIENT_IDENTITY_MISMATCH","RECIPIENT_SELF","RECIPIENT_CHAT_UNAVAILABLE"]) assert.equal(isFinalPublishFailure(`${code}: example`),true,code);
-  for(const code of ["AUTH_REQUIRED","RATE_LIMITED","REDDIT_CHAT_FAILED","SITE_CHANGED"]) assert.equal(isFinalPublishFailure(`${code}: example`),false,code);
+  for(const code of ["PUBLISH_RESULT_AMBIGUOUS","SITE_CHANGED","RECIPIENT_NOT_FOUND","RECIPIENT_IDENTITY_MISMATCH","RECIPIENT_SELF","RECIPIENT_CHAT_UNAVAILABLE"]) assert.equal(isFinalPublishFailure(`${code}: example`),true,code);
+  for(const code of ["AUTH_REQUIRED","RATE_LIMITED","REDDIT_CHAT_FAILED"]) assert.equal(isFinalPublishFailure(`${code}: example`),false,code);
 });
