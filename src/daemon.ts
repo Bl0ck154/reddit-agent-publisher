@@ -4,11 +4,13 @@ import http from "node:http";
 import { ensureState, loadConfig } from "./config.js";
 import { ExternalChrome } from "./external-chrome.js";
 import { RedditReader } from "./reddit-read.js";
+import { RedditChat } from "./reddit-chat.js";
 import { PublisherService } from "./service.js";
 import { envelope, type ResultEnvelope } from "./types.js";
 
 const config = loadConfig(); ensureState(config); const service = new PublisherService(config);
 const redditReader = new RedditReader(new ExternalChrome(config, "reddit"));
+const redditChat = new RedditChat(config);
 
 async function redditRead(work: () => Promise<unknown>): Promise<ResultEnvelope> {
   try {
@@ -35,6 +37,9 @@ async function dispatch(method: string, p: any) {
     case "reddit_thread": return redditRead(() => redditReader.thread(p.account ?? "default", p.url, p.limit ?? 50, p.depth ?? 6, p.context ?? 8));
     case "reddit_activity": return redditRead(() => redditReader.activity(p.account ?? "default", p.limit ?? 25, p.kind ?? "all"));
     case "reddit_inbox": return redditRead(() => redditReader.inbox(p.account ?? "default", p.unread_only ?? true, p.limit ?? 25));
+    case "reddit_notifications": return redditRead(() => redditReader.notifications(p.account ?? "default", p.unread_only ?? true, p.limit ?? 25));
+    case "reddit_chat_list": return redditRead(() => redditChat.conversations(p.account ?? "default", p.unread_only ?? false, p.limit ?? 25));
+    case "reddit_chat_get": return redditRead(() => redditChat.room(p.account ?? "default", p.room_id, p.limit ?? 50));
     case "diagnose": return service.diagnose(Boolean(p.live));
     case "artifact": return service.artifact(p.path);
     default: throw new Error(`Unknown RPC method: ${method}`);

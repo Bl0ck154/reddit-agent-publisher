@@ -4,7 +4,7 @@ export const AdapterId = z.enum(["reddit"]);
 export type AdapterId = z.infer<typeof AdapterId>;
 
 export const Action = z.enum([
-  "create_post", "create_comment", "edit", "delete",
+  "create_post", "create_comment", "send_chat_message", "edit", "delete",
 ]);
 export type Action = z.infer<typeof Action>;
 

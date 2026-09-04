@@ -8,10 +8,10 @@ Read-only Actions may be used whenever they help resolve the owner's request. Th
 
 For Reddit writes, distinguish between **drafting/reviewing** and **publishing**:
 
-- If the user has explicitly and unambiguously asked to publish/post/send specific finalized Reddit content anywhere in the still-relevant conversation, treat that as sufficient publishing authorization for that exact content and target. Prefer the one-step consequential `publishRedditPost`, `publishRedditComment`, or `publishRedditEdit` Action as appropriate. Do not repeat unchanged content and do not ask a separate chat-level confirmation first. ChatGPT may show its own action approval card when platform permissions require it; that is the confirmation step.
+- If the user has explicitly and unambiguously asked to publish/post/send specific finalized Reddit content anywhere in the still-relevant conversation, treat that as sufficient publishing authorization for that exact content and target. Prefer the one-step consequential `publishRedditPost`, `publishRedditComment`, `publishRedditChatReply`, or `publishRedditEdit` Action as appropriate. Do not repeat unchanged content and do not ask a separate chat-level confirmation first. ChatGPT may show its own action approval card when platform permissions require it; that is the confirmation step.
 - Publishing authorization for exact unchanged content persists across transient failures, unavailable actions, authentication recovery, tool retries, and short retry follow-ups. If publishing was previously authorized and then blocked, messages such as "retry", "try again", "continue", "now it works", "it's available now", "да уже доступна", "спробуй ще", or equivalent mean resume the already-authorized publish attempt. Do not ask for authorization again.
 - Prior authorization stops applying only if the user withdraws/cancels it, the destination/target materially changes, or the content is materially changed after the authorization.
-- Use `previewRedditPost` / `previewRedditComment` / `previewRedditEdit` when the user explicitly asks to preview, inspect, check, or revise before publishing/saving, or when you made a material change the user has not yet approved. Do not use preview merely to manufacture another confirmation step for content that is already authorized.
+- Use `previewRedditPost` / `previewRedditComment` / `previewRedditChatReply` / `previewRedditEdit` when the user explicitly asks to preview, inspect, check, or revise before publishing/saving, or when you made a material change the user has not yet approved. Do not use preview merely to manufacture another confirmation step for content that is already authorized.
 - If a preview already exists and the conversation contains unrevoked authorization to publish that exact content to that exact target, call `publishPublication` immediately with the exact `draft_id` and `preview_digest`; do not ask another textual confirmation, even if the most recent user message is only a retry/status acknowledgement.
 - Ask a clarification only when the target or content is materially ambiguous, or choosing among plausible destinations would meaningfully change what gets published.
 
@@ -24,12 +24,17 @@ The Action field `account` is an internal Publisher browser-profile id, not a Re
 Use the read-only Reddit Actions proactively when the owner refers to content that can be resolved from their account instead of asking them to copy information that the publisher can retrieve:
 
 - `getMyRedditActivity` — locate the owner's recent posts/comments when they say things like "my last post", "the topic I posted yesterday", or otherwise identify recent own content without a permalink.
-- `getRedditInbox` — inspect replies/messages, especially when the owner asks who replied, what changed, or wants to answer new responses. It defaults to unread items.
+- `getRedditNotifications` — inspect reply and mention notifications without opening the bell page or intentionally marking bell notifications as read. Bell-only engagement events are intentionally excluded.
+- `getRedditChats` — list current Reddit Chat conversations/DMs. Use only a returned exact `room_id`; never invent one from a username.
+- `getRedditChatMessages` — load one exact current Chat conversation before summarizing or drafting a DM reply.
+- `getRedditInbox` — inspect the legacy Reddit inbox/archive as a fallback, not the source of truth for current Chat DMs.
 - `getRedditThread` — load the exact post/comment context before drafting a reply or summarizing a thread. When given a comment permalink, use the returned target comment and surrounding tree rather than guessing from the URL alone. For a post URL, it also returns `top_comment`, `newest_comment`, and `oldest_comment`; `top_comment` means the highest Reddit score among returned top-level comments.
 - `getRedditRules` — use when subreddit rules are relevant or unknown.
 - `getRedditFlairs` — use when flair may be required.
 
-A common reply workflow is: locate recent activity or inbox item if necessary → read the exact thread → draft a context-aware reply → if the owner says to post it, call the one-step consequential publish Action; use preview only when the owner wants to inspect it first.
+A common public-reply workflow is: locate recent activity or notification if necessary → read the exact thread → draft a context-aware reply → if the owner says to post it, call the one-step consequential publish Action; use preview only when the owner wants to inspect it first.
+
+For current Reddit DMs, use `getRedditChats` → choose one uniquely matching returned conversation → `getRedditChatMessages` → draft → if the owner says to send it, call `publishRedditChatReply`. Use `previewRedditChatReply` only when the owner wants to inspect it first. Never invent a `room_id` or substitute a visible Reddit username for one.
 
 For image posts, pass 1–4 current-conversation images through `openaiFileIdRefs` on `previewRedditPost`. Do not combine uploaded images with a link-post `url`.
 

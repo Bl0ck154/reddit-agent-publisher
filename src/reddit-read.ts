@@ -314,6 +314,18 @@ export class RedditReader {
     });
   }
 
+  async notifications(account: string, unreadOnly = true, limit = 25): Promise<JsonObject> {
+    const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+    return this.withPage(account, async page => {
+      const username = await this.username(page);
+      const endpoint = unreadOnly ? "/message/unread.json" : "/message/inbox.json";
+      const payload = await this.fetchJson(page, `${endpoint}?raw_json=1&limit=${safeLimit}`);
+      const items = normalizeInboxPayload(payload).filter(item => Boolean(item.was_comment) || /reply|mention/i.test(String(item.subject ?? "")));
+      return { username, unread_only: unreadOnly, items, count: items.length, fetched_at: new Date().toISOString(),
+        source: "reddit-safe-inbox", note: "Reply and mention notifications are read without opening Reddit's bell page, because opening the bell page can mark notifications as read. Bell-only engagement events such as vote milestones are intentionally not included." };
+    });
+  }
+
   private async withPage<T>(account: string, fn: (page: Page) => Promise<T>): Promise<T> {
     const page = await this.chrome.page(account);
     try {

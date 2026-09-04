@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { type Locator, type Page } from "playwright-core";
 import type { Config } from "../config.js";
+import { RedditChat, isRedditChatRoomId } from "../reddit-chat.js";
 import { ExternalChrome } from "../external-chrome.js";
 import type { Draft } from "../types.js";
 import type { Adapter, PreviewData, PublishData } from "./base.js";
@@ -177,8 +178,9 @@ export class RedditBrowserAdapter implements Adapter {
   private flairsCache = new Map<string, CacheEntry>();
   private leanPages = new WeakSet<Page>();
   private leanStates = new WeakMap<Page, LeanState>();
+  private chat: RedditChat;
 
-  constructor(private config: Config) { this.chrome = new ExternalChrome(config, "reddit"); }
+  constructor(private config: Config) { this.chrome = new ExternalChrome(config, "reddit"); this.chat = new RedditChat(config); }
 
   async validate(d: Draft): Promise<void> {
     if (d.action === "create_post") {
@@ -189,6 +191,11 @@ export class RedditBrowserAdapter implements Adapter {
     } else if (d.action === "create_comment") {
       if (!d.target.url || !String(d.content.body ?? "").trim()) throw new Error("An exact Reddit permalink and body are required");
       this.permalink(String(d.target.url));
+    } else if (d.action === "send_chat_message") {
+      const roomId = String(d.target.room_id ?? "");
+      const body = String(d.content.body ?? "").trim();
+      if (!isRedditChatRoomId(roomId) || !body) throw new Error("A Reddit Chat room_id and body are required");
+      if (body.length > 40_000) throw new Error("Reddit chat reply body is too long");
     } else if (["edit", "delete"].includes(d.action)) {
       if (!d.target.url) throw new Error("An exact Reddit publication permalink is required for edit/delete");
       this.permalink(String(d.target.url));
@@ -347,6 +354,11 @@ export class RedditBrowserAdapter implements Adapter {
   }
 
   async preview(d: Draft): Promise<PreviewData> {
+    if (d.action === "send_chat_message") {
+      const roomId = String(d.target.room_id);
+      const context = await this.chat.room(d.account, roomId, 12);
+      return { summary: { backend:"reddit-matrix", action:d.action, account:d.account, target:{room_id:roomId}, content:{body:String(d.content.body)}, conversation:context, notice:"The exact Reddit Chat room and reply text were verified. Nothing has been sent yet." } };
+    }
     const page = await this.page(d.account, true);
     try {
       let session: PreviewSession;
@@ -372,6 +384,10 @@ export class RedditBrowserAdapter implements Adapter {
   }
 
   async publish(d: Draft): Promise<PublishData> {
+    if (d.action === "send_chat_message") {
+      const result = await this.chat.sendMessage(d.account, String(d.target.room_id), String(d.content.body));
+      return { status:"PUBLISHED", external_id:String(result.event_id), warnings:[] };
+    }
     const pin = this.previewPin(d.id);
     try {
       const s = this.previews.get(d.id);

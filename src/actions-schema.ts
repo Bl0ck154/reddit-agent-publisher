@@ -106,6 +106,15 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
           responses: { "200": okResponse },
         },
       },
+      "/v1/reddit/notifications": {
+        get: { operationId:"getRedditNotifications", "x-openai-isConsequential":false, summary:"Read Reddit reply and mention notifications", description:"Read-only. Returns reply and mention notifications without opening Reddit's bell page, so this does not intentionally mark bell notifications as read. Bell-only engagement events such as vote milestones are intentionally excluded.", parameters:[{name:"account",in:"query",required:false,schema:account},{name:"unread_only",in:"query",required:false,schema:{type:"boolean",default:true}},{name:"limit",in:"query",required:false,schema:{type:"integer",minimum:1,maximum:100,default:25}}], responses:{"200":okResponse} },
+      },
+      "/v1/reddit/chats": {
+        get: { operationId:"getRedditChats", "x-openai-isConsequential":false, summary:"Read current Reddit Chat conversations and DMs", description:"Read-only. Lists current Reddit Chat conversations through the authenticated Reddit session. Use the returned exact room_id for reading or replying; never invent one from a username.", parameters:[{name:"account",in:"query",required:false,schema:account},{name:"unread_only",in:"query",required:false,schema:{type:"boolean",default:false}},{name:"limit",in:"query",required:false,schema:{type:"integer",minimum:1,maximum:100,default:25}}], responses:{"200":okResponse} },
+      },
+      "/v1/reddit/chats/messages": {
+        get: { operationId:"getRedditChatMessages", "x-openai-isConsequential":false, summary:"Read one exact Reddit Chat conversation", description:"Read-only. Loads recent messages from one exact room_id returned by getRedditChats.", parameters:[{name:"room_id",in:"query",required:true,schema:{type:"string"}},{name:"account",in:"query",required:false,schema:account},{name:"limit",in:"query",required:false,schema:{type:"integer",minimum:1,maximum:100,default:50}}], responses:{"200":okResponse} },
+      },
       "/v1/reddit/posts/publish": {
         post: {
           operationId: "publishRedditPost",
@@ -139,6 +148,9 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
           }),
           responses: { "200": { description: "Published or a structured error", content: { "application/json": { schema: { $ref: "#/components/schemas/PublishResult" } } } } },
         },
+      },
+      "/v1/reddit/chats/replies/publish": {
+        post: { operationId:"publishRedditChatReply", "x-openai-isConsequential":true, summary:"Send a finalized reply in Reddit Chat", description:"CONSEQUENTIAL. Sends finalized text to one exact Reddit Chat room_id returned by getRedditChats. Use when the user explicitly asked to send this exact reply to that exact chat. Authorization persists for unchanged text/room across transient failures, authentication recovery, and retry/status follow-ups. Never invent room_id or ask an extra confirmation when already authorized.", requestBody:jsonBody({type:"object",required:["room_id","body"],additionalProperties:false,properties:{room_id:{type:"string",description:"Exact room_id returned by getRedditChats."},body:{type:"string"},account}}), responses:{"200":{description:"Sent or a structured error",content:{"application/json":{schema:{$ref:"#/components/schemas/PublishResult"}}}}} },
       },
       "/v1/reddit/edits/publish": {
         post: {
@@ -186,6 +198,9 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
           }),
           responses: { "200": previewResponse },
         },
+      },
+      "/v1/reddit/chats/replies/preview": {
+        post: { operationId:"previewRedditChatReply", "x-openai-isConsequential":false, summary:"Prepare a Reddit Chat reply preview", description:"Reads the exact Reddit Chat room and binds the requested reply text to it without sending. Use only when the user asks to inspect/review first or content changed. Prior authorization for exact unchanged text/room remains valid and publishPublication is next without another chat confirmation.", requestBody:jsonBody({type:"object",required:["room_id","body"],additionalProperties:false,properties:{room_id:{type:"string",description:"Exact room_id returned by getRedditChats."},body:{type:"string"},account}}), responses:{"200":previewResponse} },
       },
       "/v1/reddit/edits/preview": {
         post: {
@@ -240,7 +255,7 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
           properties: {
             ok: { type: "boolean" }, message: { type: "string" }, draft_id: { type: "string" }, preview_digest: { type: "string" },
             expires_at: { type: "string" }, preview: { type: "object", additionalProperties: true }, error_code: { type: "string" },
-            authorization_policy: { type: "string", description: "For Reddit post/comment/edit previews: earlier explicit authorization for the exact unchanged content and target persists across transient failures and retry/status follow-ups." },
+            authorization_policy: { type: "string", description: "For Reddit post/comment/chat-reply/edit previews: earlier explicit authorization for the exact unchanged content and target persists across transient failures and retry/status follow-ups." },
             next_step_if_already_authorized: { type: "string", enum: ["publishPublication"], description: "When prior explicit authorization is still valid, call this operation immediately instead of asking for another chat confirmation." },
           },
         },

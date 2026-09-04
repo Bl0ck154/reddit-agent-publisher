@@ -27,6 +27,7 @@ const RedditPost = z.object({ subreddit:z.string().min(2).max(21),title:z.string
   .refine(value=>!(value.url && value.openaiFileIdRefs?.length),{message:"A Reddit post cannot contain both a link URL and uploaded images."});
 const RedditComment = z.object({ url:z.string().url(),body:z.string().min(1).max(40_000),body_format:BodyFormat,account:Account.optional() }).strict();
 const RedditDelete = z.object({ url:z.string().url(),account:Account.optional() }).strict();
+const RedditChatMessage = z.object({ room_id:z.string().min(4).max(260),body:z.string().min(1).max(40_000),account:Account.optional() }).strict();
 const PublishBody = z.object({ preview_digest:z.string().min(16).max(256) }).strict();
 const ThreadQuery = z.object({
   url:z.string().url(), account:Account,
@@ -42,8 +43,10 @@ const InboxQuery = z.object({
   account:Account, unread_only:z.enum(["true","false"]).default("true").transform(value=>value==="true"),
   limit:z.coerce.number().int().min(1).max(100).default(25),
 });
+const ChatListQuery = z.object({ account:Account, unread_only:z.enum(["true","false"]).default("false").transform(value=>value==="true"), limit:z.coerce.number().int().min(1).max(100).default(25) });
+const ChatRoomQuery = z.object({ account:Account, room_id:z.string().min(4).max(260), limit:z.coerce.number().int().min(1).max(100).default(50) });
 
-type PreviewKind = "reddit-post"|"reddit-comment"|"reddit-edit"|"reddit-delete";
+type PreviewKind = "reddit-post"|"reddit-comment"|"reddit-chat-message"|"reddit-edit"|"reddit-delete";
 
 function publicBase(req: IncomingMessage): string {
   if (config.actionsPublicBaseUrl) return config.actionsPublicBaseUrl.replace(/\/$/, "");
@@ -117,6 +120,7 @@ function actionLabel(_adapter?: string, action?: unknown): string {
   const a = String(action ?? "");
   if (a === "create_post") return "Reddit post";
   if (a === "create_comment") return "Reddit comment";
+  if (a === "send_chat_message") return "Reddit chat message";
   if (a === "edit") return "Reddit edit";
   if (a === "delete") return "Reddit deletion";
   return "Reddit publication";
@@ -129,10 +133,11 @@ function previewOutput(env: ResultEnvelope, kind: PreviewKind): Record<string, u
   const labels: Record<PreviewKind,string> = {
     "reddit-post":`The Reddit post preview is ready and nothing has been posted yet. ${persistentAuthorization}`,
     "reddit-comment":`The Reddit comment preview is ready and nothing has been posted yet. ${persistentAuthorization}`,
+    "reddit-chat-message":`The Reddit Chat reply preview is ready and nothing has been sent yet. ${persistentAuthorization}`,
     "reddit-edit":`The Reddit edit is ready and nothing has been saved yet. ${persistentAuthorization}`,
     "reddit-delete":"The Reddit deletion target is verified and ready. Nothing has been deleted yet.",
   };
-  const redditAuthorizedNextStep = kind === "reddit-post" || kind === "reddit-comment" || kind === "reddit-edit"
+  const redditAuthorizedNextStep = kind === "reddit-post" || kind === "reddit-comment" || kind === "reddit-chat-message" || kind === "reddit-edit"
     ? { authorization_policy:persistentAuthorization, next_step_if_already_authorized:"publishPublication" }
     : {};
   return { ok:true, message:labels[kind], draft_id:env.draft_id, preview_digest:preview?.digest,
@@ -213,6 +218,15 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const env = await local("reddit_inbox", q);
     json(res,200,readOutput(env,"Reddit inbox loaded.")); return;
   }
+  if (req.method === "GET" && url.pathname === "/v1/reddit/notifications") {
+    const q = InboxQuery.parse(Object.fromEntries(url.searchParams)); const env = await local("reddit_notifications", q); json(res,200,readOutput(env,"Reddit reply/mention notifications loaded.")); return;
+  }
+  if (req.method === "GET" && url.pathname === "/v1/reddit/chats") {
+    const q = ChatListQuery.parse(Object.fromEntries(url.searchParams)); const env = await local("reddit_chat_list", q); json(res,200,readOutput(env,"Reddit Chat conversations loaded.")); return;
+  }
+  if (req.method === "GET" && url.pathname === "/v1/reddit/chats/messages") {
+    const q = ChatRoomQuery.parse(Object.fromEntries(url.searchParams)); const env = await local("reddit_chat_get", q); json(res,200,readOutput(env,"Reddit Chat messages loaded.")); return;
+  }
 
   if (req.method === "POST") {
     const raw = await readJson(req);
@@ -224,6 +238,9 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (url.pathname === "/v1/reddit/comments/publish") {
       const b=RedditComment.parse(raw); json(res,200,await prepareAndPublish({adapter:"reddit",account:b.account??"default",action:"create_comment",target:{url:b.url},content:{body:b.body,body_format:b.body_format}})); return;
     }
+    if (url.pathname === "/v1/reddit/chats/replies/publish") {
+      const b=RedditChatMessage.parse(raw); json(res,200,await prepareAndPublish({adapter:"reddit",account:b.account??"default",action:"send_chat_message",target:{room_id:b.room_id},content:{body:b.body}})); return;
+    }
     if (url.pathname === "/v1/reddit/edits/publish") {
       const b=RedditComment.parse(raw); json(res,200,await prepareAndPublish({adapter:"reddit",account:b.account??"default",action:"edit",target:{url:b.url},content:{body:b.body,body_format:b.body_format}})); return;
     }
@@ -234,6 +251,9 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     }
     if (url.pathname === "/v1/reddit/comments/preview") {
       const b=RedditComment.parse(raw); json(res,200,await preparePreview({adapter:"reddit",account:b.account??"default",action:"create_comment",target:{url:b.url},content:{body:b.body,body_format:b.body_format}},"reddit-comment")); return;
+    }
+    if (url.pathname === "/v1/reddit/chats/replies/preview") {
+      const b=RedditChatMessage.parse(raw); json(res,200,await preparePreview({adapter:"reddit",account:b.account??"default",action:"send_chat_message",target:{room_id:b.room_id},content:{body:b.body}},"reddit-chat-message")); return;
     }
     if (url.pathname === "/v1/reddit/edits/preview") {
       const b=RedditComment.parse(raw); json(res,200,await preparePreview({adapter:"reddit",account:b.account??"default",action:"edit",target:{url:b.url},content:{body:b.body,body_format:b.body_format}},"reddit-edit")); return;

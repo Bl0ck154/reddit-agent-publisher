@@ -8,7 +8,7 @@ test("public edition accepts only the Reddit adapter", () => {
 });
 
 test("review actions are not part of the public Reddit edition", () => {
-  assert.deepEqual(Action.options, ["create_post", "create_comment", "edit", "delete"]);
+  assert.deepEqual(Action.options, ["create_post", "create_comment", "send_chat_message", "edit", "delete"]);
   assert.throws(() => Action.parse("create_review"));
 });
 
