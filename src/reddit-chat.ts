@@ -71,6 +71,14 @@ export function extractRedditChatToken(html: string): { token: string; expiresAt
   return { token, expiresAt: expires };
 }
 
+export function normalizeRedditShredditChatToken(value: unknown): { token:string; expiresAt?:number } {
+  const payload=object(value);
+  const token=text(payload?.token);
+  if(!token) throw new Error("SITE_CHANGED: Reddit /svc/shreddit/token response did not include token");
+  const expires=number(payload?.expires);
+  return {token,...(expires===undefined?{}:{expiresAt:expires})};
+}
+
 function parseStoredString(value: unknown): string | undefined {
   const raw=text(value); if(!raw) return undefined;
   try { const parsed=JSON.parse(raw); return typeof parsed === "string" && parsed.trim() ? parsed : raw; } catch { return raw; }
@@ -572,6 +580,19 @@ export class RedditChat {
       } catch { /* stale token_v2: mint a fresh Matrix token below */ }
     }
 
+    const shreddit = await this.browserShredditChatToken(page, cookies);
+    if (shreddit) {
+      try {
+        const me=object(await this.request(shreddit.token, "/_matrix/client/v3/account/whoami", "GET"));
+        const userId=text(me?.user_id);
+        if(userId && userId!==expectedUserId) throw new Error("AUTH_REQUIRED: Reddit /svc/shreddit/token identity does not match the current authenticated browser account");
+        if(userId===expectedUserId){const value={token:shreddit.token,userId,expiresAt:shreddit.expiresAt ?? jwtExpiryMs(shreddit.token)}; this.tokens.set(account,value); return {token:shreddit.token,userId};}
+      } catch(error:any) {
+        if (/identity does not match/i.test(String(error?.message ?? error))) throw error;
+        // Current token endpoint can drift independently; preserve the legacy browser bootstrap fallback below.
+      }
+    }
+
     const userAgent = await page.evaluate(()=>navigator.userAgent).catch(()=>"Mozilla/5.0");
     const cookieHeader = cookies.filter(cookie=>cookie.name!=="token_v2").map(cookie=>`${cookie.name}=${cookie.value}`).join("; ");
     const bootstrap = await fetch("https://www.reddit.com/chat/", { headers:{ Cookie:cookieHeader, "User-Agent":userAgent, Accept:"text/html,application/xhtml+xml" }, redirect:"follow" });
@@ -586,6 +607,38 @@ export class RedditChat {
     if (userId !== expectedUserId) throw new Error("AUTH_REQUIRED: Reddit Matrix identity does not match the current authenticated browser account");
     this.tokens.set(account,{token:minted.token,expiresAt:minted.expiresAt ?? jwtExpiryMs(minted.token),userId});
     return {token:minted.token,userId};
+  }
+
+  private async browserShredditChatToken(page: Page, cookies: Array<{name:string;value:string}>): Promise<{token:string;expiresAt?:number} | undefined> {
+    const csrf=cookies.find(cookie=>cookie.name==="csrf_token")?.value;
+    if(!csrf) return undefined;
+    try {
+      const userAgent=await page.evaluate(()=>navigator.userAgent).catch(()=>"Mozilla/5.0");
+      const cookieHeader=cookies.map(cookie=>`${cookie.name}=${cookie.value}`).join("; ");
+      const form=new URLSearchParams({csrf_token:csrf});
+      const response=await fetch("https://www.reddit.com/svc/shreddit/token",{
+        method:"POST",
+        headers:{
+          Cookie:cookieHeader,
+          "User-Agent":userAgent,
+          Accept:"application/json,text/plain,*/*",
+          "Content-Type":"application/x-www-form-urlencoded",
+          Origin:"https://www.reddit.com",
+          Referer:"https://www.reddit.com/chat/",
+          "X-Original-Referer":"https://www.reddit.com/chat/",
+          "X-Reddit-Client-Version":"2026-06-24T12:00Z~unknown",
+        },
+        body:form.toString(),
+        redirect:"follow",
+      });
+      if(response.status===429) throw new Error("RATE_LIMITED: Reddit temporarily rate-limited Chat token refresh");
+      if(!response.ok) return undefined;
+      let payload:unknown; try {payload=JSON.parse((await response.text()).slice(0,200_000));} catch {return undefined;}
+      return normalizeRedditShredditChatToken(payload);
+    } catch(error:any) {
+      if(/^RATE_LIMITED:/.test(String(error?.message ?? error))) throw error;
+      return undefined;
+    }
   }
 
   private async browserStoredMatrixCredentials(page: Page): Promise<{token:string;userId:string;deviceId?:string} | undefined> {

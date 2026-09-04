@@ -1,12 +1,32 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { extractRedditChatLocalStorageCredentials, extractRedditChatToken, findDirectRoomForPeer, isRedditChatRoomId, normalizeRedditChatMessages, normalizeRedditChatSync, normalizeRedditRecipientProfile, redditDirectRoomCreateBody, redditMatrixUserIdFromFullname, redditMatrixUserIdFromSelfProfile } from "../reddit-chat.js";
+import { extractRedditChatLocalStorageCredentials, extractRedditChatToken, normalizeRedditShredditChatToken, findDirectRoomForPeer, isRedditChatRoomId, normalizeRedditChatMessages, normalizeRedditChatSync, normalizeRedditRecipientProfile, redditDirectRoomCreateBody, redditMatrixUserIdFromFullname, redditMatrixUserIdFromSelfProfile } from "../reddit-chat.js";
 
 test("Reddit Chat bootstrap token is extracted without persisting credentials",()=>{
   const parsed=extractRedditChatToken('<html><rs-app token="{&quot;token&quot;:&quot;abc.def.sig&quot;,&quot;expires&quot;:1770000000000}"></rs-app></html>');
   assert.equal(parsed.token,"abc.def.sig");
   assert.equal(parsed.expiresAt,1770000000000);
   assert.throws(()=>extractRedditChatToken("<html></html>"),/SITE_CHANGED/);
+});
+
+
+test("Reddit current shreddit token response is normalized as a Matrix bearer",()=>{
+  assert.deepEqual(normalizeRedditShredditChatToken({token:"fresh.jwt.token",expires:1770000000000}),{token:"fresh.jwt.token",expiresAt:1770000000000});
+  assert.deepEqual(normalizeRedditShredditChatToken({token:"fresh.jwt.token"}),{token:"fresh.jwt.token"});
+  assert.throws(()=>normalizeRedditShredditChatToken({expires:1770000000000}),/SITE_CHANGED/);
+});
+
+test("Reddit Chat session prefers current shreddit token mint before legacy rs-app login",async()=>{
+  const chat:any=new (await import("../reddit-chat.js")).RedditChat({} as any);
+  chat.browserMatrixUserId=async()=>"@t2_me:reddit.com";
+  chat.browserStoredMatrixCredentials=async()=>undefined;
+  chat.browserShredditChatToken=async(_page:any,cookies:any[])=>{assert.ok(cookies.some(c=>c.name==="csrf_token")); return {token:"shreddit-token",expiresAt:1770000000000};};
+  const used:string[]=[];
+  chat.request=async(token:string,path:string)=>{used.push(token); assert.equal(path,"/_matrix/client/v3/account/whoami"); return {user_id:"@t2_me:reddit.com"};};
+  const page:any={url:()=>"https://www.reddit.com/",context:()=>({cookies:async()=>[{name:"reddit_session",value:"r"},{name:"csrf_token",value:"csrf"}]}),evaluate:async()=>{throw new Error("legacy bootstrap should not be reached");}};
+  const result=await chat.session("owner-main",page,false);
+  assert.deepEqual(result,{token:"shreddit-token",userId:"@t2_me:reddit.com"});
+  assert.deepEqual(used,["shreddit-token"]);
 });
 
 test("Reddit Chat established browser localStorage credentials are parsed without creating a new device",()=>{
