@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { extractRedditChatToken, isRedditChatRoomId, normalizeRedditChatMessages, normalizeRedditChatSync } from "../reddit-chat.js";
+import { extractRedditChatToken, findDirectRoomForPeer, isRedditChatRoomId, normalizeRedditChatMessages, normalizeRedditChatSync, normalizeRedditRecipientProfile, redditDirectRoomCreateBody, redditMatrixUserIdFromFullname } from "../reddit-chat.js";
 
 test("Reddit Chat bootstrap token is extracted without persisting credentials",()=>{
   const parsed=extractRedditChatToken('<html><rs-app token="{&quot;token&quot;:&quot;abc.def.sig&quot;,&quot;expires&quot;:1770000000000}"></rs-app></html>');
@@ -42,4 +42,34 @@ test("Reddit Chat room history is chronological and marks own messages",()=>{
   assert.deepEqual(messages.map(x=>x.body),["hello","reply"]);
   assert.equal(messages[0].from_me,false);
   assert.equal(messages[1].from_me,true);
+});
+
+
+test("Reddit comment author fullname maps deterministically to Matrix user id",()=>{
+  assert.equal(redditMatrixUserIdFromFullname("t2_AbC123"),"@t2_abc123:reddit.com");
+  assert.throws(()=>redditMatrixUserIdFromFullname("u/example"),/t2_/);
+  const profile=normalizeRedditRecipientProfile({kind:"t2",data:{id:"AbC123",name:"TopCommenter",is_suspended:false}},"topcommenter") as any;
+  assert.equal(profile.username,"TopCommenter");
+  assert.equal(profile.fullname,"t2_abc123");
+  assert.equal(profile.matrix_user_id,"@t2_abc123:reddit.com");
+  assert.throws(()=>normalizeRedditRecipientProfile({data:{id:"abc123",name:"SomeoneElse"}},"TopCommenter"),/IDENTITY_MISMATCH/);
+});
+
+test("new Reddit direct rooms carry native direct-chat state",()=>{
+  const body=redditDirectRoomCreateBody("@t2_me:reddit.com","@t2_peer:reddit.com") as any;
+  assert.equal(body.is_direct,true);
+  assert.deepEqual(body.invite,["@t2_peer:reddit.com"]);
+  assert.equal(body.initial_state[0].type,"com.reddit.chat.type");
+  assert.equal(body.initial_state[0].content.type,"direct");
+  assert.deepEqual(body.initial_state[0].content.participants,["@t2_me:reddit.com","@t2_peer:reddit.com"]);
+});
+
+test("existing direct room is found by m.direct or one-to-one membership",()=>{
+  const direct={account_data:{events:[{type:"m.direct",content:{"@t2_peer:reddit.com":["!direct:reddit.com"]}}]},rooms:{join:{"!direct:reddit.com":{state:{events:[]},timeline:{events:[]}}}}};
+  assert.equal(findDirectRoomForPeer(direct,"@t2_me:reddit.com","@t2_peer:reddit.com"),"!direct:reddit.com");
+  const fallback={rooms:{join:{"!fallback:reddit.com":{state:{events:[
+    {type:"m.room.member",state_key:"@t2_me:reddit.com",content:{membership:"join"}},
+    {type:"m.room.member",state_key:"@t2_peer:reddit.com",content:{membership:"invite"}},
+  ]},timeline:{events:[]}}}}};
+  assert.equal(findDirectRoomForPeer(fallback,"@t2_me:reddit.com","@t2_peer:reddit.com"),"!fallback:reddit.com");
 });

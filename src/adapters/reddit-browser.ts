@@ -192,10 +192,14 @@ export class RedditBrowserAdapter implements Adapter {
       if (!d.target.url || !String(d.content.body ?? "").trim()) throw new Error("An exact Reddit permalink and body are required");
       this.permalink(String(d.target.url));
     } else if (d.action === "send_chat_message") {
-      const roomId = String(d.target.room_id ?? "");
+      const roomId = d.target.room_id === undefined ? "" : String(d.target.room_id);
+      const recipient = d.target.recipient_username === undefined ? "" : String(d.target.recipient_username).trim();
       const body = String(d.content.body ?? "").trim();
-      if (!isRedditChatRoomId(roomId) || !body) throw new Error("A Reddit Chat room_id and body are required");
-      if (body.length > 40_000) throw new Error("Reddit chat reply body is too long");
+      if ((!roomId && !recipient) || (roomId && recipient) || !body) throw new Error("A Reddit Chat room_id OR recipient_username, plus body, are required");
+      if (roomId && !isRedditChatRoomId(roomId)) throw new Error("A valid Reddit Chat room_id is required");
+      if (recipient && !/^[A-Za-z0-9_-]{1,20}$/.test(recipient.replace(/^u\//i,""))) throw new Error("A valid Reddit recipient_username is required");
+      if (d.target.recipient_fullname !== undefined && !/^t2_[a-z0-9]+$/i.test(String(d.target.recipient_fullname))) throw new Error("recipient_fullname must be a Reddit t2_ user id when supplied");
+      if (body.length > 40_000) throw new Error("Reddit chat message body is too long");
     } else if (["edit", "delete"].includes(d.action)) {
       if (!d.target.url) throw new Error("An exact Reddit publication permalink is required for edit/delete");
       this.permalink(String(d.target.url));
@@ -355,9 +359,13 @@ export class RedditBrowserAdapter implements Adapter {
 
   async preview(d: Draft): Promise<PreviewData> {
     if (d.action === "send_chat_message") {
-      const roomId = String(d.target.room_id);
-      const context = await this.chat.room(d.account, roomId, 12);
-      return { summary: { backend:"reddit-matrix", action:d.action, account:d.account, target:{room_id:roomId}, content:{body:String(d.content.body)}, conversation:context, notice:"The exact Reddit Chat room and reply text were verified. Nothing has been sent yet." } };
+      if (d.target.room_id) {
+        const roomId = String(d.target.room_id);
+        const context = await this.chat.room(d.account, roomId, 12);
+        return { summary: { backend:"reddit-matrix", action:d.action, account:d.account, target:{room_id:roomId}, content:{body:String(d.content.body)}, conversation:context, notice:"The exact Reddit Chat room and reply text were verified. Nothing has been sent yet." } };
+      }
+      const recipient = await this.chat.directTarget(d.account, String(d.target.recipient_username), d.target.recipient_fullname ? String(d.target.recipient_fullname) : undefined);
+      return { summary: { backend:"reddit-matrix", action:d.action, account:d.account, target:{recipient_username:recipient.username,recipient_fullname:recipient.fullname,matrix_user_id:recipient.matrix_user_id,existing_room_id:recipient.existing_room_id}, content:{body:String(d.content.body)}, notice:recipient.existing_room_id ? "The Reddit recipient identity and existing direct chat were verified. Nothing has been sent yet." : "The Reddit recipient identity was verified. No existing direct chat was found; publishing will create a native Reddit direct-chat/message request and send this text. Preview itself creates nothing." } };
     }
     const page = await this.page(d.account, true);
     try {
@@ -385,8 +393,10 @@ export class RedditBrowserAdapter implements Adapter {
 
   async publish(d: Draft): Promise<PublishData> {
     if (d.action === "send_chat_message") {
-      const result = await this.chat.sendMessage(d.account, String(d.target.room_id), String(d.content.body));
-      return { status:"PUBLISHED", external_id:String(result.event_id), warnings:[] };
+      const result = d.target.room_id
+        ? await this.chat.sendMessage(d.account, String(d.target.room_id), String(d.content.body), d.id)
+        : await this.chat.sendDirectMessage(d.account, String(d.target.recipient_username), String(d.content.body), d.target.recipient_fullname ? String(d.target.recipient_fullname) : undefined, d.id);
+      return { status:"PUBLISHED", external_id:String(result.event_id), warnings:Array.isArray(result.warnings)?result.warnings:[] };
     }
     const pin = this.previewPin(d.id);
     try {

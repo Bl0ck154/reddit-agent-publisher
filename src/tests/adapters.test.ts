@@ -60,8 +60,11 @@ test("Reddit browser adapter accepts canonical comment permalink",async()=>{
 test("Reddit browser adapter validates an exact Reddit Chat room reply",async()=>{
   const a=new RedditBrowserAdapter(config); await a.validate({...base,action:"send_chat_message",target:{room_id:"!room123:reddit.com"},content:{body:"Owner DM reply"}} as Draft);
 });
+test("Reddit browser adapter validates a verified username direct-message target",async()=>{
+  const a=new RedditBrowserAdapter(config); await a.validate({...base,action:"send_chat_message",target:{recipient_username:"TopCommenter",recipient_fullname:"t2_abc123"},content:{body:"Owner DM"}} as Draft);
+});
 test("Reddit browser adapter rejects invented non-Reddit Chat room ids",async()=>{
-  const a=new RedditBrowserAdapter(config); await assert.rejects(()=>a.validate({...base,action:"send_chat_message",target:{room_id:"!room123:evil.invalid"},content:{body:"x"}} as Draft),/room_id and body/);
+  const a=new RedditBrowserAdapter(config); await assert.rejects(()=>a.validate({...base,action:"send_chat_message",target:{room_id:"!room123:evil.invalid"},content:{body:"x"}} as Draft),/valid Reddit Chat room_id/);
 });
 
 test("Reddit browser adapter rejects arbitrary Reddit paths for mutations",async()=>{

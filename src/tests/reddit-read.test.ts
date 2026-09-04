@@ -63,11 +63,12 @@ test("normalizeThreadPayload exposes deterministic top/newest/oldest top-level c
     { data: { children: [{ kind: "t3", data: { id: "abc123", name: "t3_abc123", subreddit: "test", title: "Title", selftext: "Body", author: "owner", score: 10, num_comments: 3, created_utc: 1_700_000_000, permalink: "/r/test/comments/abc123/title/" } }] } },
     { data: { children: [
       { kind: "t1", data: { id: "root1", name: "t1_root1", parent_id: "t3_abc123", subreddit: "test", author: "alice", body: "Older root", score: 2, created_utc: 1_700_000_001, permalink: "/r/test/comments/abc123/title/root1/", replies: { data: { children: [{ kind: "t1", data: { id: "nested", name: "t1_nested", parent_id: "t1_root1", subreddit: "test", author: "nested", body: "Nested with huge score", score: 999, created_utc: 1_700_000_002, permalink: "/r/test/comments/abc123/title/nested/", replies: "" } }] } } } },
-      { kind: "t1", data: { id: "root2", name: "t1_root2", parent_id: "t3_abc123", subreddit: "test", author: "bob", body: "Top root", score: 7, created_utc: 1_700_000_003, permalink: "/r/test/comments/abc123/title/root2/", replies: "" } },
+      { kind: "t1", data: { id: "root2", name: "t1_root2", parent_id: "t3_abc123", subreddit: "test", author: "bob", author_fullname: "t2_bob123", body: "Top root", score: 7, created_utc: 1_700_000_003, permalink: "/r/test/comments/abc123/title/root2/", replies: "" } },
     ] } },
   ];
   const result = normalizeThreadPayload(payload, target);
   assert.equal((result.top_comment as Record<string, unknown>).id, "root2");
+  assert.equal((result.top_comment as Record<string, unknown>).author_fullname, "t2_bob123");
   assert.equal((result.oldest_comment as Record<string, unknown>).id, "root1");
   assert.equal((result.newest_comment as Record<string, unknown>).id, "root2");
   assert.equal((result.top_comment as Record<string, unknown>).permalink, "https://www.reddit.com/r/test/comments/abc123/title/root2/");

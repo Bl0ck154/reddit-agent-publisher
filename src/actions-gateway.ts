@@ -28,6 +28,7 @@ const RedditPost = z.object({ subreddit:z.string().min(2).max(21),title:z.string
 const RedditComment = z.object({ url:z.string().url(),body:z.string().min(1).max(40_000),body_format:BodyFormat,account:Account.optional() }).strict();
 const RedditDelete = z.object({ url:z.string().url(),account:Account.optional() }).strict();
 const RedditChatMessage = z.object({ room_id:z.string().min(4).max(260),body:z.string().min(1).max(40_000),account:Account.optional() }).strict();
+const RedditDirectMessage = z.object({ recipient_username:z.string().min(1).max(20).regex(/^[A-Za-z0-9_-]+$/),recipient_fullname:z.string().regex(/^t2_[a-z0-9]+$/i).optional(),body:z.string().min(1).max(40_000),account:Account.optional() }).strict();
 const PublishBody = z.object({ preview_digest:z.string().min(16).max(256) }).strict();
 const ThreadQuery = z.object({
   url:z.string().url(), account:Account,
@@ -113,6 +114,9 @@ function errorMessage(env: ResultEnvelope): string {
   if (code === "ACCOUNT_BUSY") return "The publishing browser is busy with another write. Try this action again shortly.";
   if (code === "RATE_LIMITED") return "The publisher is cooling down or Reddit temporarily rate-limited the request. Try again shortly.";
   if (code === "SITE_CHANGED") return "The Reddit/site response changed and the publisher stopped safely instead of guessing. The adapter needs inspection.";
+  if (code === "RECIPIENT_NOT_FOUND") return "That Reddit recipient could not be verified, so no direct message was sent.";
+  if (code === "RECIPIENT_IDENTITY_MISMATCH") return "The Reddit username no longer matches the verified account id from the source content, so no message was sent.";
+  if (code === "RECIPIENT_CHAT_UNAVAILABLE") return "Reddit does not currently allow starting a chat with that account.";
   return env.error?.message ?? "The publisher could not complete this operation.";
 }
 
@@ -241,6 +245,9 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (url.pathname === "/v1/reddit/chats/replies/publish") {
       const b=RedditChatMessage.parse(raw); json(res,200,await prepareAndPublish({adapter:"reddit",account:b.account??"default",action:"send_chat_message",target:{room_id:b.room_id},content:{body:b.body}})); return;
     }
+    if (url.pathname === "/v1/reddit/chats/direct/publish") {
+      const b=RedditDirectMessage.parse(raw); json(res,200,await prepareAndPublish({adapter:"reddit",account:b.account??"default",action:"send_chat_message",target:{recipient_username:b.recipient_username,recipient_fullname:b.recipient_fullname},content:{body:b.body}})); return;
+    }
     if (url.pathname === "/v1/reddit/edits/publish") {
       const b=RedditComment.parse(raw); json(res,200,await prepareAndPublish({adapter:"reddit",account:b.account??"default",action:"edit",target:{url:b.url},content:{body:b.body,body_format:b.body_format}})); return;
     }
@@ -254,6 +261,9 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     }
     if (url.pathname === "/v1/reddit/chats/replies/preview") {
       const b=RedditChatMessage.parse(raw); json(res,200,await preparePreview({adapter:"reddit",account:b.account??"default",action:"send_chat_message",target:{room_id:b.room_id},content:{body:b.body}},"reddit-chat-message")); return;
+    }
+    if (url.pathname === "/v1/reddit/chats/direct/preview") {
+      const b=RedditDirectMessage.parse(raw); json(res,200,await preparePreview({adapter:"reddit",account:b.account??"default",action:"send_chat_message",target:{recipient_username:b.recipient_username,recipient_fullname:b.recipient_fullname},content:{body:b.body}},"reddit-chat-message")); return;
     }
     if (url.pathname === "/v1/reddit/edits/preview") {
       const b=RedditComment.parse(raw); json(res,200,await preparePreview({adapter:"reddit",account:b.account??"default",action:"edit",target:{url:b.url},content:{body:b.body,body_format:b.body_format}},"reddit-edit")); return;

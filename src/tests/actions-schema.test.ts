@@ -28,6 +28,8 @@ test("read and preview actions are non-consequential but real publish always req
   assert.equal(schema.paths["/v1/reddit/chats/messages"].get["x-openai-isConsequential"],false);
   assert.equal(schema.paths["/v1/reddit/chats/replies/preview"].post["x-openai-isConsequential"],false);
   assert.equal(schema.paths["/v1/reddit/chats/replies/publish"].post["x-openai-isConsequential"],true);
+  assert.equal(schema.paths["/v1/reddit/chats/direct/preview"].post["x-openai-isConsequential"],false);
+  assert.equal(schema.paths["/v1/reddit/chats/direct/publish"].post["x-openai-isConsequential"],true);
   assert.equal(schema.paths["/v1/reddit/posts/preview"].post["x-openai-isConsequential"],false);
   assert.equal(schema.paths["/v1/reddit/posts/publish"].post["x-openai-isConsequential"],true);
   assert.equal(schema.paths["/v1/reddit/comments/publish"].post["x-openai-isConsequential"],true);
@@ -52,6 +54,7 @@ test("Reddit publish authorization persists across retry follow-ups",()=>{
   const schema=buildActionsOpenApi("https://publisher.example.com") as any;
   const commentPublish=String(schema.paths["/v1/reddit/comments/publish"].post.description);
   const chatPublish=String(schema.paths["/v1/reddit/chats/replies/publish"].post.description);
+  const directPublish=String(schema.paths["/v1/reddit/chats/direct/publish"].post.description);
   const commentPreview=String(schema.paths["/v1/reddit/comments/preview"].post.description);
   const legacyPublish=String(schema.paths["/v1/publications/{draft_id}/publish"].post.description);
   assert.match(commentPublish,/earlier or current turn/i);
@@ -60,6 +63,8 @@ test("Reddit publish authorization persists across retry follow-ups",()=>{
   assert.match(commentPreview,/authorization remains valid/i);
   assert.match(chatPublish,/authorization persists/i);
   assert.match(chatPublish,/room_id/i);
+  assert.match(directPublish,/recipient_fullname/i);
+  assert.match(directPublish,/message request/i);
   assert.match(commentPreview,/without another chat confirmation/i);
   assert.match(legacyPublish,/latest user message is only a retry\/status acknowledgement/i);
   assert.equal(schema.components.schemas.PreviewResult.properties.next_step_if_already_authorized.enum[0],"publishPublication");

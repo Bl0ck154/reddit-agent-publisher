@@ -67,7 +67,7 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
           operationId: "getRedditThread",
           "x-openai-isConsequential": false,
           summary: "Read a Reddit post and its comment context",
-          description: "Read-only. Use an exact Reddit post or comment permalink. Returns the post, nested comments, the targeted comment when applicable, plus deterministic top_comment/newest_comment/oldest_comment shortcuts for top-level comments. top_comment means the highest Reddit score among returned top-level comments.",
+          description: "Read-only. Use an exact Reddit post or comment permalink. Returns the post, nested comments, the targeted comment when applicable, plus deterministic top_comment/newest_comment/oldest_comment shortcuts for top-level comments. top_comment means the highest Reddit score among returned top-level comments. Comment shortcuts include author and author_fullname (t2_ user id) so an agent can safely address the exact author in a direct-message action.",
           parameters: [
             { name: "url", in: "query", required: true, schema: { type: "string", format: "uri" } },
             { name: "account", in: "query", required: false, schema: account },
@@ -152,6 +152,9 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
       "/v1/reddit/chats/replies/publish": {
         post: { operationId:"publishRedditChatReply", "x-openai-isConsequential":true, summary:"Send a finalized reply in Reddit Chat", description:"CONSEQUENTIAL. Sends finalized text to one exact Reddit Chat room_id returned by getRedditChats. Use when the user explicitly asked to send this exact reply to that exact chat. Authorization persists for unchanged text/room across transient failures, authentication recovery, and retry/status follow-ups. Never invent room_id or ask an extra confirmation when already authorized.", requestBody:jsonBody({type:"object",required:["room_id","body"],additionalProperties:false,properties:{room_id:{type:"string",description:"Exact room_id returned by getRedditChats."},body:{type:"string"},account}}), responses:{"200":{description:"Sent or a structured error",content:{"application/json":{schema:{$ref:"#/components/schemas/PublishResult"}}}}} },
       },
+      "/v1/reddit/chats/direct/publish": {
+        post: { operationId:"publishRedditDirectMessage", "x-openai-isConsequential":true, summary:"Send a finalized direct message to a Reddit user", description:"CONSEQUENTIAL. Verifies recipient_username against Reddit immediately before sending. If recipient_fullname (t2_...) came from getRedditThread, pass it too; the server rejects any username/account-id mismatch. Reuses an existing 1:1 Chat when present, otherwise creates a native Reddit direct Chat/message request with com.reddit.chat.type state and sends the text. Preview creates no chat.", requestBody:jsonBody({type:"object",required:["recipient_username","body"],additionalProperties:false,properties:{recipient_username:{type:"string",description:"Exact Reddit username, for example top_comment.author."},recipient_fullname:{type:"string",description:"Optional but strongly preferred t2_ account id, for example top_comment.author_fullname."},body:{type:"string"},account}}), responses:{"200":{description:"Sent or a structured error",content:{"application/json":{schema:{$ref:"#/components/schemas/PublishResult"}}}}} },
+      },
       "/v1/reddit/edits/publish": {
         post: {
           operationId: "publishRedditEdit",
@@ -201,6 +204,9 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
       },
       "/v1/reddit/chats/replies/preview": {
         post: { operationId:"previewRedditChatReply", "x-openai-isConsequential":false, summary:"Prepare a Reddit Chat reply preview", description:"Reads the exact Reddit Chat room and binds the requested reply text to it without sending. Use only when the user asks to inspect/review first or content changed. Prior authorization for exact unchanged text/room remains valid and publishPublication is next without another chat confirmation.", requestBody:jsonBody({type:"object",required:["room_id","body"],additionalProperties:false,properties:{room_id:{type:"string",description:"Exact room_id returned by getRedditChats."},body:{type:"string"},account}}), responses:{"200":previewResponse} },
+      },
+      "/v1/reddit/chats/direct/preview": {
+        post: { operationId:"previewRedditDirectMessage", "x-openai-isConsequential":false, summary:"Verify a Reddit direct-message recipient and preview the text", description:"Read-only with respect to the recipient: verifies the Reddit username/account id and checks for an existing direct room. It never creates a room, invite, message request, or message. If no existing Chat is found, publish will create one.", requestBody:jsonBody({type:"object",required:["recipient_username","body"],additionalProperties:false,properties:{recipient_username:{type:"string",description:"Exact Reddit username, for example top_comment.author."},recipient_fullname:{type:"string",description:"Optional verified t2_ id, for example top_comment.author_fullname."},body:{type:"string"},account}}), responses:{"200":previewResponse} },
       },
       "/v1/reddit/edits/preview": {
         post: {

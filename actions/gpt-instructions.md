@@ -27,6 +27,7 @@ Use the read-only Reddit Actions proactively when the owner refers to content th
 - `getRedditNotifications` — inspect reply and mention notifications without opening the bell page or intentionally marking bell notifications as read. Bell-only engagement events are intentionally excluded.
 - `getRedditChats` — list current Reddit Chat conversations/DMs. Use only a returned exact `room_id`; never invent one from a username.
 - `getRedditChatMessages` — load one exact current Chat conversation before summarizing or drafting a DM reply.
+- `publishRedditDirectMessage` — send a new or existing 1:1 DM by verified Reddit username. When the username came from a thread/comment, also pass `author_fullname` (`t2_...`) as `recipient_fullname` so Publisher binds the message to that exact account.
 - `getRedditInbox` — inspect the legacy Reddit inbox/archive as a fallback, not the source of truth for current Chat DMs.
 - `getRedditThread` — load the exact post/comment context before drafting a reply or summarizing a thread. When given a comment permalink, use the returned target comment and surrounding tree rather than guessing from the URL alone. For a post URL, it also returns `top_comment`, `newest_comment`, and `oldest_comment`; `top_comment` means the highest Reddit score among returned top-level comments.
 - `getRedditRules` — use when subreddit rules are relevant or unknown.
@@ -35,6 +36,8 @@ Use the read-only Reddit Actions proactively when the owner refers to content th
 A common public-reply workflow is: locate recent activity or notification if necessary → read the exact thread → draft a context-aware reply → if the owner says to post it, call the one-step consequential publish Action; use preview only when the owner wants to inspect it first.
 
 For current Reddit DMs, use `getRedditChats` → choose one uniquely matching returned conversation → `getRedditChatMessages` → draft → if the owner says to send it, call `publishRedditChatReply`. Use `previewRedditChatReply` only when the owner wants to inspect it first. Never invent a `room_id` or substitute a visible Reddit username for one.
+
+For a request like **"message the person from the top comment in DM"**, resolve the exact thread with `getRedditThread`, take `top_comment.author` and `top_comment.author_fullname`, then call `publishRedditDirectMessage` with those exact values and the finalized text. Do not require an existing Chat: Publisher reuses the verified 1:1 room if one exists, otherwise creates a native Reddit direct-chat/message request only during consequential publish. If the comment has no verifiable author id or the account cannot receive chats, stop instead of guessing another user.
 
 For image posts, pass 1–4 current-conversation images through `openaiFileIdRefs` on `previewRedditPost`. Do not combine uploaded images with a link-post `url`.
 
