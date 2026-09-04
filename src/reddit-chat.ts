@@ -33,7 +33,9 @@ export function normalizeRedditRecipientProfile(value: unknown, expectedUsername
   if (!username || !id || !/^[a-z0-9]+$/i.test(id)) throw new Error("RECIPIENT_NOT_FOUND: Reddit did not return a valid user profile");
   if (expectedUsername && username.toLowerCase() !== expectedUsername.toLowerCase()) throw new Error("RECIPIENT_IDENTITY_MISMATCH: Reddit username resolved to an unexpected account");
   const fullname = `t2_${id.toLowerCase()}`;
-  return { username, fullname, matrix_user_id:redditMatrixUserIdFromFullname(fullname), is_suspended:Boolean(data?.is_suspended) };
+  const acceptChats = typeof data?.accept_chats === "boolean" ? data.accept_chats : undefined;
+  const isBlocked = typeof data?.is_blocked === "boolean" ? data.is_blocked : undefined;
+  return { username, fullname, matrix_user_id:redditMatrixUserIdFromFullname(fullname), is_suspended:Boolean(data?.is_suspended), accept_chats:acceptChats, is_blocked:isBlocked };
 }
 export function redditDirectRoomCreateBody(ownUserId: string, peerUserId: string): JsonObject {
   if (!MATRIX_USER.test(ownUserId) || !MATRIX_USER.test(peerUserId) || ownUserId === peerUserId) throw new Error("Two distinct Reddit Matrix user ids are required");
@@ -314,6 +316,8 @@ export class RedditChat {
       const profile = normalizeRedditRecipientProfile(payload, requested);
       if (expectedFullname && String(profile.fullname).toLowerCase() !== String(expectedFullname).toLowerCase()) throw new Error("RECIPIENT_IDENTITY_MISMATCH: the verified Reddit account id does not match the source comment");
       if (profile.is_suspended) throw new Error("RECIPIENT_CHAT_UNAVAILABLE: Reddit account is suspended");
+      if (profile.is_blocked === true) throw new Error("RECIPIENT_CHAT_UNAVAILABLE: this Reddit account is blocked by the connected account");
+      if (profile.accept_chats === false) throw new Error("RECIPIENT_CHAT_UNAVAILABLE: this Reddit account is not accepting chat requests from the connected session");
       return profile;
     } finally { this.chrome.release(account); }
   }

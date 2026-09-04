@@ -48,10 +48,12 @@ test("Reddit Chat room history is chronological and marks own messages",()=>{
 test("Reddit comment author fullname maps deterministically to Matrix user id",()=>{
   assert.equal(redditMatrixUserIdFromFullname("t2_AbC123"),"@t2_abc123:reddit.com");
   assert.throws(()=>redditMatrixUserIdFromFullname("u/example"),/t2_/);
-  const profile=normalizeRedditRecipientProfile({kind:"t2",data:{id:"AbC123",name:"TopCommenter",is_suspended:false}},"topcommenter") as any;
+  const profile=normalizeRedditRecipientProfile({kind:"t2",data:{id:"AbC123",name:"TopCommenter",is_suspended:false,accept_chats:true,is_blocked:false}},"topcommenter") as any;
   assert.equal(profile.username,"TopCommenter");
   assert.equal(profile.fullname,"t2_abc123");
   assert.equal(profile.matrix_user_id,"@t2_abc123:reddit.com");
+  assert.equal(profile.accept_chats,true);
+  assert.equal(profile.is_blocked,false);
   assert.throws(()=>normalizeRedditRecipientProfile({data:{id:"abc123",name:"SomeoneElse"}},"TopCommenter"),/IDENTITY_MISMATCH/);
 });
 
@@ -72,4 +74,57 @@ test("existing direct room is found by m.direct or one-to-one membership",()=>{
     {type:"m.room.member",state_key:"@t2_peer:reddit.com",content:{membership:"invite"}},
   ]},timeline:{events:[]}}}}};
   assert.equal(findDirectRoomForPeer(fallback,"@t2_me:reddit.com","@t2_peer:reddit.com"),"!fallback:reddit.com");
+});
+
+
+test("direct-message send creates a native room once, marks m.direct, then sends with stable txn",async()=>{
+  const chat:any=new (await import("../reddit-chat.js")).RedditChat({} as any);
+  chat.resolveRecipientProfile=async()=>({username:"TopCommenter",fullname:"t2_peer",matrix_user_id:"@t2_peer:reddit.com",accept_chats:true});
+  chat.withMatrix=async(_account:string,work:any)=>work({token:"tok",userId:"@t2_me:reddit.com"});
+  chat.sync=async()=>({account_data:{events:[]},rooms:{join:{}}});
+  const calls:any[]=[];
+  chat.request=async(_token:string,path:string,method:string,body:any)=>{
+    calls.push({path,method,body});
+    if(path==="/_matrix/client/v3/createRoom") return {room_id:"!newroom:reddit.com"};
+    if(path.includes("/send/m.room.message/")) return {event_id:"$event1"};
+    return {};
+  };
+  const result=await chat.sendDirectMessage("owner-main","TopCommenter","hello","t2_peer","draft-123");
+  assert.equal(result.room_id,"!newroom:reddit.com");
+  assert.equal(result.created_conversation,true);
+  assert.equal(calls.filter(c=>c.path==="/_matrix/client/v3/createRoom").length,1);
+  const create=calls.find(c=>c.path==="/_matrix/client/v3/createRoom");
+  assert.equal(create.body.initial_state[0].type,"com.reddit.chat.type");
+  assert.deepEqual(create.body.initial_state[0].content.participants,["@t2_me:reddit.com","@t2_peer:reddit.com"]);
+  assert.equal(calls.some(c=>c.path.includes("/account_data/m.direct")),true);
+  assert.equal(calls.some(c=>c.path.includes("publisher-draft-123")),true);
+});
+
+test("direct-message send reuses an existing one-to-one room and never creates another",async()=>{
+  const chat:any=new (await import("../reddit-chat.js")).RedditChat({} as any);
+  chat.resolveRecipientProfile=async()=>({username:"TopCommenter",fullname:"t2_peer",matrix_user_id:"@t2_peer:reddit.com",accept_chats:true});
+  chat.withMatrix=async(_account:string,work:any)=>work({token:"tok",userId:"@t2_me:reddit.com"});
+  chat.sync=async()=>({account_data:{events:[{type:"m.direct",content:{"@t2_peer:reddit.com":["!existing:reddit.com"]}}]},rooms:{join:{"!existing:reddit.com":{state:{events:[]},timeline:{events:[]}}}}});
+  const calls:any[]=[];
+  chat.request=async(_token:string,path:string,method:string,body:any)=>{calls.push({path,method,body}); if(path.includes("/send/m.room.message/")) return {event_id:"$event2"}; return {};};
+  const result=await chat.sendDirectMessage("owner-main","TopCommenter","hello","t2_peer","draft-456");
+  assert.equal(result.room_id,"!existing:reddit.com");
+  assert.equal(result.created_conversation,false);
+  assert.equal(calls.some(c=>c.path==="/_matrix/client/v3/createRoom"),false);
+  assert.equal(calls.filter(c=>c.path.includes("/send/m.room.message/")).length,1);
+});
+
+test("interrupted room creation recovers the created room before sending instead of creating a duplicate",async()=>{
+  const chat:any=new (await import("../reddit-chat.js")).RedditChat({} as any);
+  chat.resolveRecipientProfile=async()=>({username:"TopCommenter",fullname:"t2_peer",matrix_user_id:"@t2_peer:reddit.com",accept_chats:true});
+  chat.withMatrix=async(_account:string,work:any)=>work({token:"tok",userId:"@t2_me:reddit.com"});
+  let syncs=0;
+  chat.sync=async()=>{syncs+=1; return syncs===1 ? {account_data:{events:[]},rooms:{join:{}}} : {account_data:{events:[{type:"m.direct",content:{"@t2_peer:reddit.com":["!recovered:reddit.com"]}}]},rooms:{join:{"!recovered:reddit.com":{state:{events:[]},timeline:{events:[]}}}}};};
+  const calls:any[]=[];
+  chat.request=async(_token:string,path:string,method:string,body:any)=>{calls.push({path,method,body}); if(path==="/_matrix/client/v3/createRoom") throw new Error("socket reset"); if(path.includes("/send/m.room.message/")) return {event_id:"$event3"}; return {};};
+  const result=await chat.sendDirectMessage("owner-main","TopCommenter","hello","t2_peer","draft-789");
+  assert.equal(result.room_id,"!recovered:reddit.com");
+  assert.equal(calls.filter(c=>c.path==="/_matrix/client/v3/createRoom").length,1);
+  assert.equal(calls.filter(c=>c.path.includes("/send/m.room.message/")).length,1);
+  assert.match(result.warnings[0],/Recovered an already-created/);
 });
