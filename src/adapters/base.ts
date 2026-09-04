@@ -11,6 +11,8 @@ export interface PublishData {
   url?: string;
   status: string;
   warnings?: string[];
+  /** Internal alias used to deduplicate an equivalent retry that reaches the same mutation through a different target form. */
+  idempotency_alias_target?: string;
 }
 
 export interface Adapter {

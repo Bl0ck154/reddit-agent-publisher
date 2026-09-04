@@ -402,7 +402,8 @@ export class RedditBrowserAdapter implements Adapter {
       const result = d.target.room_id
         ? await this.chat.sendMessage(d.account, String(d.target.room_id), String(d.content.body), transactionKey)
         : await this.chat.sendDirectMessage(d.account, String(d.target.recipient_username), String(d.content.body), d.target.recipient_fullname ? String(d.target.recipient_fullname) : undefined, transactionKey);
-      return { status:"PUBLISHED", external_id:String(result.event_id), warnings:Array.isArray(result.warnings)?result.warnings:[] };
+      return { status:"PUBLISHED", external_id:String(result.event_id), warnings:Array.isArray(result.warnings)?result.warnings:[],
+        idempotency_alias_target:result.room_id ? `room:${String(result.room_id)}` : undefined };
     }
     const pin = this.previewPin(d.id);
     try {

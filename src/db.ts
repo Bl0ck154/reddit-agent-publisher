@@ -139,6 +139,14 @@ export class Store {
       .run(now,externalId ?? null,now,expiresAt,fingerprint);
   }
 
+  recordCompletedMutationAlias(input:{fingerprint:string;adapter:string;account:string;action:string;draft_id:string;transaction_key:string;external_id?:string}, completedRetryTtlMs = 5 * 60_000): void {
+    const nowMs=Date.now(); const now=new Date(nowMs).toISOString(); const expiresAt=new Date(nowMs+completedRetryTtlMs).toISOString();
+    this.db.prepare(`INSERT INTO mutation_intents(fingerprint,adapter,account,action,transaction_key,draft_id,created_at,updated_at,expires_at,completed_at,external_id)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(fingerprint) DO UPDATE SET adapter=excluded.adapter,account=excluded.account,action=excluded.action,transaction_key=excluded.transaction_key,draft_id=excluded.draft_id,updated_at=excluded.updated_at,expires_at=excluded.expires_at,completed_at=excluded.completed_at,external_id=excluded.external_id`)
+      .run(input.fingerprint,input.adapter,input.account,input.action,input.transaction_key,input.draft_id,now,now,expiresAt,now,input.external_id ?? null);
+  }
+
   setSecret(name: string, value: unknown): void {
     this.db.prepare("INSERT INTO secrets VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value_ciphertext=excluded.value_ciphertext, updated_at=excluded.updated_at")
       .run(name, seal(value), new Date().toISOString());

@@ -12,16 +12,16 @@ export function isFinalPublishFailure(message: string): boolean {
   return /^(?:PUBLISH_RESULT_AMBIGUOUS|RECIPIENT_NOT_FOUND|RECIPIENT_IDENTITY_MISMATCH|RECIPIENT_SELF|RECIPIENT_CHAT_UNAVAILABLE):/.test(String(message));
 }
 
-export function redditChatMutationFingerprint(d: Draft): string | undefined {
+export function redditChatMutationFingerprint(d: Draft, targetOverride?: string): string | undefined {
   if (d.adapter !== "reddit" || d.action !== "send_chat_message") return undefined;
   const body=String(d.content.body ?? "").trim();
-  const target=d.target.room_id
+  const target=targetOverride ?? (d.target.room_id
     ? `room:${String(d.target.room_id)}`
     : d.target.recipient_username
       ? `user:${String(d.target.recipient_username).replace(/^u\//i,"").toLowerCase()}`
       : d.target.recipient_fullname
         ? `user:${String(d.target.recipient_fullname).toLowerCase()}`
-        : "";
+        : "");
   if (!body || !target) return undefined;
   return crypto.createHash("sha256").update(JSON.stringify([d.adapter,d.account,d.action,target,body])).digest("hex");
 }
@@ -157,11 +157,13 @@ export class PublisherService {
       }
       if (intent) d.execution={idempotency_key:intent.transaction_key,retry_intent_reused:intent.reused};
       const r = await this.adapter(d.adapter).publish(d);
+      const aliasFingerprint=intentFingerprint && r.idempotency_alias_target ? redditChatMutationFingerprint(d,r.idempotency_alias_target) : undefined;
       this.store.db.transaction(()=>{
         const changed=this.store.db.prepare("UPDATE drafts SET state='PUBLISHED', updated_at=? WHERE id=? AND state='PUBLISHING'").run(new Date().toISOString(),id);
         if(changed.changes!==1) throw new Error("INVALID_STATE: lost publishing claim");
         this.store.db.prepare("INSERT INTO publications(id,draft_id,adapter,account,external_id,canonical_url,metadata_ciphertext,created_at) VALUES(?,?,?,?,?,?,?,?)").run(crypto.randomUUID(), id, d.adapter, d.account, r.external_id ?? null, r.url ?? null, "", new Date().toISOString());
         if(intentFingerprint) this.store.completeMutationIntent(intentFingerprint,r.external_id);
+        if(aliasFingerprint && aliasFingerprint!==intentFingerprint && intent) this.store.recordCompletedMutationAlias({fingerprint:aliasFingerprint,adapter:d.adapter,account:d.account,action:d.action,draft_id:id,transaction_key:intent.transaction_key,external_id:r.external_id});
       })();
       this.store.audit("publication.published", actor, id, { external_id: r.external_id, url: r.url, retry_intent_reused:intent?.reused ?? false });
       this.lastMutation.set(lock, Date.now());

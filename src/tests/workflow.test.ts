@@ -14,7 +14,7 @@ class FakeReddit implements Adapter {
   readonly id = "reddit"; publishes = 0; executionKeys:string[]=[];
   async validate(_: Draft) {}
   async preview(d: Draft) { return { summary:{title:d.content.title,notice:"not published"} }; }
-  async publish(d: Draft) { this.publishes++; if(d.execution?.idempotency_key)this.executionKeys.push(d.execution.idempotency_key); return {status:"PUBLISHED",external_id:"$matrix_event_dryrun",url:"https://example.invalid/dryrun"}; }
+  async publish(d: Draft) { this.publishes++; if(d.execution?.idempotency_key)this.executionKeys.push(d.execution.idempotency_key); return {status:"PUBLISHED",external_id:"$matrix_event_dryrun",url:"https://example.invalid/dryrun",idempotency_alias_target:"room:!peerroom:reddit.com"}; }
   async login(_: string) { return {status:"USER_ACTION_REQUIRED"}; }
   async status(_: string) { return {authenticated:false}; }
   async diagnose(_: boolean) { return {ok:true}; }
@@ -48,6 +48,8 @@ test("identical Reddit DM retries across new drafts are deduplicated with a pers
   const send=async(body:string,withFullname=true)=>{const target:any={recipient_username:"TopCommenter"}; if(withFullname)target.recipient_fullname="t2_peer"; const prepared=await service.prepare({adapter:"reddit",account:"test",action:"send_chat_message",target,content:{body},owner_command:true},"gpt-action"); const preview=await service.preview(prepared.draft_id!,"gpt-action"); return service.publishConfirmedAction(prepared.draft_id!,(preview.preview as any).digest,"gpt-action");};
   const first=await send("same DM body",true); assert.equal(first.ok,true); assert.equal(first.side_effect.performed,true); assert.equal(fake.publishes,1); assert.equal(fake.executionKeys.length,1);
   const second=await send("same DM body",false); assert.equal(second.ok,true); assert.equal(second.side_effect.performed,false); assert.equal((second.result as any).deduplicated_retry,true); assert.equal((second.result as any).external_id,"$matrix_event_dryrun"); assert.equal(fake.publishes,1);
+  const roomPrepared=await service.prepare({adapter:"reddit",account:"test",action:"send_chat_message",target:{room_id:"!peerroom:reddit.com"},content:{body:"same DM body"},owner_command:true},"gpt-action"); const roomPreview=await service.preview(roomPrepared.draft_id!,"gpt-action"); const switched=await service.publishConfirmedAction(roomPrepared.draft_id!,(roomPreview.preview as any).digest,"gpt-action");
+  assert.equal(switched.ok,true); assert.equal(switched.side_effect.performed,false); assert.equal((switched.result as any).deduplicated_retry,true); assert.equal(fake.publishes,1);
   const changed=await send("different DM body"); assert.equal(changed.ok,true); assert.equal(changed.side_effect.performed,true); assert.equal(fake.publishes,2); assert.notEqual(fake.executionKeys[0],fake.executionKeys[1]);
   service.store.db.close(); fs.rmSync(stateDir,{recursive:true,force:true});
 });
