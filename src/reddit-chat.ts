@@ -25,6 +25,12 @@ export function redditMatrixUserIdFromFullname(value: string): string {
   if (!match) throw new Error("A Reddit t2_ user fullname is required");
   return `@t2_${match[1].toLowerCase()}:reddit.com`;
 }
+export function redditMatrixUserIdFromSelfProfile(value: unknown): string {
+  const root=object(value); const data=object(root?.data);
+  const id=text(data?.id); const name=text(data?.name);
+  if (root?.kind !== "t2" || !id || !name || !/^[a-z0-9]+$/i.test(id)) throw new Error("AUTH_REQUIRED: Reddit browser account identity is unavailable");
+  return redditMatrixUserIdFromFullname(`t2_${id}`);
+}
 export function normalizeRedditRecipientProfile(value: unknown, expectedUsername?: string): JsonObject {
   const root = object(value);
   const data = object(root?.data);
@@ -430,16 +436,23 @@ export class RedditChat {
   }
 
   private async session(account: string, page: Page, force = false): Promise<{token:string;userId:string}> {
-    const cached = this.tokens.get(account);
-    if (!force && cached?.token && (!cached.expiresAt || cached.expiresAt > Date.now()+60_000)) {
-      if (cached.userId) return { token:cached.token, userId:cached.userId };
-      const me = object(await this.request(cached.token, "/_matrix/client/v3/account/whoami", "GET"));
-      const userId = text(me?.user_id); if (userId) { cached.userId=userId; return {token:cached.token,userId}; }
-    }
-
     if (!/^https:\/\/(?:www\.|old\.|new\.)?reddit\.com(?:\/|$)/i.test(page.url())) {
       await page.goto("https://www.reddit.com/", { waitUntil:"domcontentloaded", timeout:30_000 });
     }
+    const expectedUserId = await this.browserMatrixUserId(page);
+    const cached = this.tokens.get(account);
+    if (!force && cached?.token && (!cached.expiresAt || cached.expiresAt > Date.now()+60_000)) {
+      if (cached.userId === expectedUserId) return { token:cached.token, userId:cached.userId };
+      if (!cached.userId) {
+        try {
+          const me = object(await this.request(cached.token, "/_matrix/client/v3/account/whoami", "GET"));
+          const userId = text(me?.user_id);
+          if (userId === expectedUserId) { cached.userId=userId; return {token:cached.token,userId}; }
+        } catch { /* refresh below */ }
+      }
+      this.tokens.delete(account);
+    }
+
     const cookies = await page.context().cookies("https://www.reddit.com/");
     const redditSession = cookies.find(cookie=>cookie.name==="reddit_session")?.value;
     if (!redditSession) throw new Error("AUTH_REQUIRED: Reddit browser session is not logged in");
@@ -450,7 +463,7 @@ export class RedditChat {
         try {
           const me = object(await this.request(tokenV2, "/_matrix/client/v3/account/whoami", "GET"));
           const userId = text(me?.user_id);
-          if (userId) {
+          if (userId === expectedUserId) {
             const value={token:tokenV2,userId,expiresAt:jwtExpiryMs(tokenV2)}; this.tokens.set(account,value); return {token:tokenV2,userId};
           }
         } catch { /* stale token_v2: mint a fresh Matrix token below */ }
@@ -468,8 +481,20 @@ export class RedditChat {
     const loginBody = object(await login.json().catch(()=>({}))) ?? {};
     const userId = text(loginBody.user_id) ?? text(object(await this.request(minted.token, "/_matrix/client/v3/account/whoami", "GET"))?.user_id);
     if (!userId) throw new Error("SITE_CHANGED: Reddit Matrix login did not return a user id");
+    if (userId !== expectedUserId) throw new Error("AUTH_REQUIRED: Reddit Matrix identity does not match the current authenticated browser account");
     this.tokens.set(account,{token:minted.token,expiresAt:minted.expiresAt ?? jwtExpiryMs(minted.token),userId});
     return {token:minted.token,userId};
+  }
+
+  private async browserMatrixUserId(page: Page): Promise<string> {
+    const response=await page.evaluate(async()=>{
+      const result=await fetch("/api/me.json?raw_json=1",{credentials:"include",headers:{Accept:"application/json"}});
+      return {status:result.status,text:(await result.text()).slice(0,200_000)};
+    });
+    if (response.status === 401 || response.status === 403) throw new Error("AUTH_REQUIRED: Reddit rejected the saved browser session while binding Chat identity");
+    if (response.status < 200 || response.status >= 300) throw new Error(`REDDIT_CHAT_FAILED: Reddit self lookup returned HTTP ${response.status}`);
+    let payload:unknown; try { payload=JSON.parse(response.text); } catch { throw new Error("SITE_CHANGED: Reddit self lookup returned non-JSON content"); }
+    return redditMatrixUserIdFromSelfProfile(payload);
   }
 
   private async request(token: string, path: string, method: "GET"|"PUT"|"POST", body?:unknown, query?:Record<string,string>): Promise<unknown> {

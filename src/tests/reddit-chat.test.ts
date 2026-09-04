@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { extractRedditChatToken, findDirectRoomForPeer, isRedditChatRoomId, normalizeRedditChatMessages, normalizeRedditChatSync, normalizeRedditRecipientProfile, redditDirectRoomCreateBody, redditMatrixUserIdFromFullname } from "../reddit-chat.js";
+import { extractRedditChatToken, findDirectRoomForPeer, isRedditChatRoomId, normalizeRedditChatMessages, normalizeRedditChatSync, normalizeRedditRecipientProfile, redditDirectRoomCreateBody, redditMatrixUserIdFromFullname, redditMatrixUserIdFromSelfProfile } from "../reddit-chat.js";
 
 test("Reddit Chat bootstrap token is extracted without persisting credentials",()=>{
   const parsed=extractRedditChatToken('<html><rs-app token="{&quot;token&quot;:&quot;abc.def.sig&quot;,&quot;expires&quot;:1770000000000}"></rs-app></html>');
@@ -44,6 +44,12 @@ test("Reddit Chat room history is chronological and marks own messages",()=>{
   assert.equal(messages[1].from_me,true);
 });
 
+
+test("Reddit browser self identity maps to the exact Matrix sender and rejects malformed identity",()=>{
+  assert.equal(redditMatrixUserIdFromSelfProfile({kind:"t2",data:{id:"S4315V5UP",name:"EfficiencyGood4815"}}),"@t2_s4315v5up:reddit.com");
+  assert.throws(()=>redditMatrixUserIdFromSelfProfile({kind:"Listing",data:{id:"s4315v5up",name:"EfficiencyGood4815"}}),/AUTH_REQUIRED/);
+  assert.throws(()=>redditMatrixUserIdFromSelfProfile({kind:"t2",data:{name:"EfficiencyGood4815"}}),/AUTH_REQUIRED/);
+});
 
 test("Reddit comment author fullname maps deterministically to Matrix user id",()=>{
   assert.equal(redditMatrixUserIdFromFullname("t2_AbC123"),"@t2_abc123:reddit.com");
