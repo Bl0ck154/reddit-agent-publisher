@@ -489,7 +489,21 @@ export class RedditChat {
     this.roomId(roomId);
     const safeKey = String(transactionKey ?? crypto.randomUUID()).replace(/[^A-Za-z0-9._~-]/g,"_").slice(0,120);
     const txn = `publisher-${safeKey}`;
-    const payload = await this.request(token, `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${encodeURIComponent(txn)}`, "PUT", {msgtype:"m.text",body});
+    let payload: unknown;
+    try {
+      payload = await this.request(token, `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${encodeURIComponent(txn)}`, "PUT", {msgtype:"m.text",body});
+    } catch (error:any) {
+      const failure=String(error?.message ?? error);
+      const matrixPayload=object(error?.matrixPayload);
+      const status=Number(error?.matrixStatus ?? failure.match(/Matrix returned HTTP (\d+)/i)?.[1] ?? 0);
+      const matrixText=`${text(matrixPayload?.errcode) ?? ""} ${text(matrixPayload?.error) ?? ""} ${failure}`;
+      if (/User is flagged for spam/i.test(matrixText)) throw new Error("SENDER_CHAT_RESTRICTED: Reddit rejected this connected account/device as spam or insufficiently trusted for Chat sending");
+      if (/^RATE_LIMITED:|^AUTH_REQUIRED:|Matrix authentication/i.test(failure)) throw error;
+      if (status === 403 || /M_FORBIDDEN/i.test(matrixText)) throw new Error("RECIPIENT_CHAT_UNAVAILABLE: Reddit no longer allows sending a message in this chat");
+      if (status === 404) throw new Error("RECIPIENT_CHAT_UNAVAILABLE: the Reddit Chat room no longer exists or is no longer accessible");
+      if (status >= 400 && status < 500 && status !== 408 && status !== 409) throw new Error(`SITE_CHANGED: Reddit Chat send returned unrecognized HTTP ${status}`);
+      throw error;
+    }
     const eventId = text(object(payload)?.event_id);
     if (!eventId) throw new Error("PUBLISH_RESULT_AMBIGUOUS: Reddit Chat did not return a Matrix event id");
     return eventId;

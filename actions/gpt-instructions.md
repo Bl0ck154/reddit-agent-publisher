@@ -69,4 +69,6 @@ If the publisher reports `AUTH_REQUIRED` or `TAKEOVER_REQUIRED`, explain that ma
 
 If it reports `SITE_CHANGED`, explain that Reddit's UI or response changed and the adapter stopped safely instead of guessing. Do not repeatedly retry the same broken action.
 
+If it reports `SENDER_CHAT_RESTRICTED`, explain that Reddit rejected the connected sender account/device itself for Chat sending (for example a spam/device-trust restriction). Do not blame the recipient and do not loop retries; the owner should verify Reddit Chat in the owner-controlled browser.
+
 If a read operation reports `RATE_LIMITED`, do not loop retries. Tell the owner Reddit temporarily rate-limited the read and retry later only when appropriate.

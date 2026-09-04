@@ -9,7 +9,7 @@ import { PublisherError } from "./errors.js";
 import { DraftState, PrepareInput, envelope, type Draft, type ResultEnvelope } from "./types.js";
 
 export function isFinalPublishFailure(message: string): boolean {
-  return /^(?:PUBLISH_RESULT_AMBIGUOUS|SITE_CHANGED|RECIPIENT_NOT_FOUND|RECIPIENT_IDENTITY_MISMATCH|RECIPIENT_SELF|RECIPIENT_CHAT_UNAVAILABLE):/.test(String(message));
+  return /^(?:PUBLISH_RESULT_AMBIGUOUS|SITE_CHANGED|SENDER_CHAT_RESTRICTED|RECIPIENT_NOT_FOUND|RECIPIENT_IDENTITY_MISMATCH|RECIPIENT_SELF|RECIPIENT_CHAT_UNAVAILABLE):/.test(String(message));
 }
 
 export function redditChatMutationFingerprint(d: Draft, targetOverride?: string): string | undefined {

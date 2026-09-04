@@ -272,6 +272,20 @@ test("room-id reply accepts a pending request before sending",async()=>{
   assert.equal(calls[1].path.includes("/send/m.room.message/"),true);
 });
 
+test("Reddit Chat send forbiddens are terminal and distinguish sender device trust from room access",async()=>{
+  const run=async(status:number,payload:any)=>{
+    const chat:any=new (await import("../reddit-chat.js")).RedditChat({} as any);
+    chat.withMatrix=async(_account:string,work:any)=>work({token:"tok",userId:"@t2_me:reddit.com"});
+    chat.sync=async()=>({rooms:{join:{}}});
+    chat.request=async()=>{const e:any=new Error(`REDDIT_CHAT_FAILED: Matrix returned HTTP ${status} ${payload?.errcode ?? ""}: ${payload?.error ?? ""}`); e.matrixStatus=status; e.matrixPayload=payload; throw e;};
+    return chat.sendMessage("owner-main","!room:reddit.com","hello","stable-txn");
+  };
+  await assert.rejects(()=>run(403,{errcode:"M_FORBIDDEN",error:"User is flagged for spam"}),/SENDER_CHAT_RESTRICTED/);
+  await assert.rejects(()=>run(403,{errcode:"M_FORBIDDEN",error:"Forbidden"}),/RECIPIENT_CHAT_UNAVAILABLE/);
+  await assert.rejects(()=>run(404,{errcode:"M_NOT_FOUND",error:"Unknown room"}),/RECIPIENT_CHAT_UNAVAILABLE/);
+  await assert.rejects(()=>run(400,{errcode:"M_BAD_JSON",error:"changed contract"}),/SITE_CHANGED/);
+});
+
 test("HTTP 503 after createRoom is recovered through sync before any retry can create a duplicate",async()=>{
   const chat:any=new (await import("../reddit-chat.js")).RedditChat({} as any);
   chat.resolveRecipientProfile=async()=>({username:"TopCommenter",fullname:"t2_peer",matrix_user_id:"@t2_peer:reddit.com",accept_chats:true});
