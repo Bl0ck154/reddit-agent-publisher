@@ -398,9 +398,10 @@ export class RedditBrowserAdapter implements Adapter {
 
   async publish(d: Draft): Promise<PublishData> {
     if (d.action === "send_chat_message") {
+      const transactionKey=d.execution?.idempotency_key ?? d.id;
       const result = d.target.room_id
-        ? await this.chat.sendMessage(d.account, String(d.target.room_id), String(d.content.body), d.id)
-        : await this.chat.sendDirectMessage(d.account, String(d.target.recipient_username), String(d.content.body), d.target.recipient_fullname ? String(d.target.recipient_fullname) : undefined, d.id);
+        ? await this.chat.sendMessage(d.account, String(d.target.room_id), String(d.content.body), transactionKey)
+        : await this.chat.sendDirectMessage(d.account, String(d.target.recipient_username), String(d.content.body), d.target.recipient_fullname ? String(d.target.recipient_fullname) : undefined, transactionKey);
       return { status:"PUBLISHED", external_id:String(result.event_id), warnings:Array.isArray(result.warnings)?result.warnings:[] };
     }
     const pin = this.previewPin(d.id);

@@ -8,6 +8,20 @@ import { Store } from "./db.js";
 import { PublisherError } from "./errors.js";
 import { DraftState, PrepareInput, envelope, type Draft, type ResultEnvelope } from "./types.js";
 
+export function redditChatMutationFingerprint(d: Draft): string | undefined {
+  if (d.adapter !== "reddit" || d.action !== "send_chat_message") return undefined;
+  const body=String(d.content.body ?? "").trim();
+  const target=d.target.room_id
+    ? `room:${String(d.target.room_id)}`
+    : d.target.recipient_username
+      ? `user:${String(d.target.recipient_username).replace(/^u\//i,"").toLowerCase()}`
+      : d.target.recipient_fullname
+        ? `user:${String(d.target.recipient_fullname).toLowerCase()}`
+        : "";
+  if (!body || !target) return undefined;
+  return crypto.createHash("sha256").update(JSON.stringify([d.adapter,d.account,d.action,target,body])).digest("hex");
+}
+
 export class PublisherService {
   readonly store: Store;
   private adapters: Map<string, Adapter>;
@@ -123,13 +137,29 @@ export class PublisherService {
         const claimed=this.store.db.prepare("UPDATE drafts SET state='PUBLISHING', updated_at=? WHERE id=? AND state='APPROVED'").run(new Date().toISOString(),id);
         if(consumed.changes!==1||claimed.changes!==1) throw new Error("APPROVAL_STALE: publish claim failed");
       })();
+      const intentFingerprint=redditChatMutationFingerprint(d);
+      const intent=intentFingerprint ? this.store.acquireMutationIntent({fingerprint:intentFingerprint,adapter:d.adapter,account:d.account,action:d.action,draft_id:id}) : undefined;
+      if (intent?.completed && intent.external_id) {
+        const now=new Date().toISOString();
+        this.store.db.transaction(()=>{
+          const changed=this.store.db.prepare("UPDATE drafts SET state='PUBLISHED', updated_at=? WHERE id=? AND state='PUBLISHING'").run(now,id);
+          if(changed.changes!==1) throw new Error("INVALID_STATE: lost publishing claim while deduplicating retry");
+          this.store.db.prepare("INSERT INTO publications(id,draft_id,adapter,account,external_id,canonical_url,metadata_ciphertext,created_at) VALUES(?,?,?,?,?,?,?,?)").run(crypto.randomUUID(),id,d.adapter,d.account,intent.external_id,null,"",now);
+        })();
+        this.store.audit("publication.retry_deduplicated",actor,id,{external_id:intent.external_id,fingerprint:intentFingerprint});
+        this.lastMutation.set(lock,Date.now());
+        return envelope({state:"PUBLISHED",adapter:d.adapter,account:d.account,draft_id:id,revision:d.revision,side_effect:{performed:false},
+          result:{status:"PUBLISHED",external_id:intent.external_id,already_published:true,deduplicated_retry:true},warnings:["Identical recent Reddit Chat write was already completed; the retry was deduplicated before another send."]});
+      }
+      if (intent) d.execution={idempotency_key:intent.transaction_key,retry_intent_reused:intent.reused};
       const r = await this.adapter(d.adapter).publish(d);
       this.store.db.transaction(()=>{
         const changed=this.store.db.prepare("UPDATE drafts SET state='PUBLISHED', updated_at=? WHERE id=? AND state='PUBLISHING'").run(new Date().toISOString(),id);
         if(changed.changes!==1) throw new Error("INVALID_STATE: lost publishing claim");
         this.store.db.prepare("INSERT INTO publications(id,draft_id,adapter,account,external_id,canonical_url,metadata_ciphertext,created_at) VALUES(?,?,?,?,?,?,?,?)").run(crypto.randomUUID(), id, d.adapter, d.account, r.external_id ?? null, r.url ?? null, "", new Date().toISOString());
+        if(intentFingerprint) this.store.completeMutationIntent(intentFingerprint,r.external_id);
       })();
-      this.store.audit("publication.published", actor, id, { external_id: r.external_id, url: r.url });
+      this.store.audit("publication.published", actor, id, { external_id: r.external_id, url: r.url, retry_intent_reused:intent?.reused ?? false });
       this.lastMutation.set(lock, Date.now());
       return envelope({ state: "PUBLISHED", adapter: d.adapter, account: d.account, draft_id: id, revision: d.revision,
         side_effect: { performed: true }, result: r, warnings: r.warnings ?? [] });

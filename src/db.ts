@@ -35,6 +35,12 @@ export class Store {
         id TEXT PRIMARY KEY, draft_id TEXT NOT NULL, adapter TEXT NOT NULL, account TEXT NOT NULL,
         external_id TEXT, canonical_url TEXT, metadata_ciphertext TEXT NOT NULL, created_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS mutation_intents (
+        fingerprint TEXT PRIMARY KEY, adapter TEXT NOT NULL, account TEXT NOT NULL, action TEXT NOT NULL,
+        transaction_key TEXT NOT NULL, draft_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL, completed_at TEXT, external_id TEXT
+      );
+      CREATE INDEX IF NOT EXISTS mutation_intents_expires_at ON mutation_intents(expires_at);
       CREATE TABLE IF NOT EXISTS audit_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT, event_type TEXT NOT NULL, actor TEXT NOT NULL,
         draft_id TEXT, metadata_json TEXT NOT NULL, previous_hash TEXT, event_hash TEXT NOT NULL, created_at TEXT NOT NULL
@@ -105,6 +111,32 @@ export class Store {
   pending(): Draft[] {
     return (this.db.prepare("SELECT id FROM drafts WHERE state NOT IN ('PUBLISHED','CANCELLED','EXPIRED') ORDER BY created_at DESC").all() as any[])
       .map((r) => this.getDraft(r.id)!).filter(Boolean);
+  }
+
+  acquireMutationIntent(input: { fingerprint:string; adapter:string; account:string; action:string; draft_id:string }, pendingTtlMs = 24 * 60 * 60_000): { transaction_key:string; reused:boolean; completed:boolean; external_id?:string; expires_at:string } {
+    const nowMs = Date.now();
+    const now = new Date(nowMs).toISOString();
+    return this.db.transaction(() => {
+      const existing = this.db.prepare("SELECT * FROM mutation_intents WHERE fingerprint=?").get(input.fingerprint) as any;
+      if (existing && Date.parse(existing.expires_at) > nowMs) {
+        this.db.prepare("UPDATE mutation_intents SET draft_id=?, updated_at=? WHERE fingerprint=?").run(input.draft_id, now, input.fingerprint);
+        return { transaction_key:String(existing.transaction_key), reused:true, completed:Boolean(existing.completed_at), external_id:existing.external_id ?? undefined, expires_at:String(existing.expires_at) };
+      }
+      const transactionKey = `intent-${crypto.randomUUID()}`;
+      const expiresAt = new Date(nowMs + pendingTtlMs).toISOString();
+      this.db.prepare(`INSERT INTO mutation_intents(fingerprint,adapter,account,action,transaction_key,draft_id,created_at,updated_at,expires_at,completed_at,external_id)
+        VALUES(?,?,?,?,?,?,?,?,?,NULL,NULL)
+        ON CONFLICT(fingerprint) DO UPDATE SET adapter=excluded.adapter,account=excluded.account,action=excluded.action,transaction_key=excluded.transaction_key,draft_id=excluded.draft_id,created_at=excluded.created_at,updated_at=excluded.updated_at,expires_at=excluded.expires_at,completed_at=NULL,external_id=NULL`)
+        .run(input.fingerprint,input.adapter,input.account,input.action,transactionKey,input.draft_id,now,now,expiresAt);
+      this.db.prepare("DELETE FROM mutation_intents WHERE expires_at<=? AND fingerprint<>?").run(now,input.fingerprint);
+      return { transaction_key:transactionKey, reused:false, completed:false, expires_at:expiresAt };
+    })();
+  }
+
+  completeMutationIntent(fingerprint: string, externalId?: string, completedRetryTtlMs = 5 * 60_000): void {
+    const nowMs=Date.now(); const now=new Date(nowMs).toISOString(); const expiresAt=new Date(nowMs+completedRetryTtlMs).toISOString();
+    this.db.prepare("UPDATE mutation_intents SET completed_at=?, external_id=?, updated_at=?, expires_at=? WHERE fingerprint=?")
+      .run(now,externalId ?? null,now,expiresAt,fingerprint);
   }
 
   setSecret(name: string, value: unknown): void {

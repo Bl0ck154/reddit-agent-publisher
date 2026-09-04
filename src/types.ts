@@ -36,6 +36,8 @@ export interface Draft {
   digest: string;
   created_at: string;
   updated_at: string;
+  /** Transient execution metadata supplied by PublisherService immediately before a write. Never persisted in the draft payload or included in its approval digest. */
+  execution?: { idempotency_key?: string; retry_intent_reused?: boolean };
 }
 
 export interface ResultEnvelope {
