@@ -281,14 +281,15 @@ export function normalizeInboxPayload(payload: unknown): JsonObject[] {
 export class RedditReader {
   constructor(private chrome: ExternalChrome) {}
 
-  async thread(account: string, inputUrl: string, limit = 50, depth = 6, context = 8): Promise<JsonObject> {
+  async thread(account: string, inputUrl: string, limit = 50, depth = 6, context = 8, sort: "best"|"top"|"new"|"old"|"controversial"|"qa" = "best"): Promise<JsonObject> {
     const target = canonicalRedditThreadTarget(inputUrl);
     const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
     const safeDepth = Math.max(1, Math.min(10, Math.floor(depth)));
     const safeContext = Math.max(0, Math.min(10, Math.floor(context)));
+    const safeSort = ["best","top","new","old","controversial","qa"].includes(sort) ? sort : "best";
     const endpoint = target.comment_id
-      ? `/r/${encodeURIComponent(target.subreddit)}/comments/${target.post_id}/_/${target.comment_id}.json?raw_json=1&limit=${safeLimit}&depth=${safeDepth}&context=${safeContext}`
-      : `/r/${encodeURIComponent(target.subreddit)}/comments/${target.post_id}.json?raw_json=1&limit=${safeLimit}&depth=${safeDepth}`;
+      ? `/r/${encodeURIComponent(target.subreddit)}/comments/${target.post_id}/_/${target.comment_id}.json?raw_json=1&limit=${safeLimit}&depth=${safeDepth}&context=${safeContext}&sort=${safeSort}`
+      : `/r/${encodeURIComponent(target.subreddit)}/comments/${target.post_id}.json?raw_json=1&limit=${safeLimit}&depth=${safeDepth}&sort=${safeSort}`;
     return this.withPage(account, async page => ({
       ...normalizeThreadPayload(await this.fetchJson(page, endpoint), target),
       fetched_at: new Date().toISOString(),

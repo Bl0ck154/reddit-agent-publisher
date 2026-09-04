@@ -74,6 +74,7 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
             { name: "limit", in: "query", required: false, schema: { type: "integer", minimum: 1, maximum: 100, default: 50 } },
             { name: "depth", in: "query", required: false, schema: { type: "integer", minimum: 1, maximum: 10, default: 6 } },
             { name: "context", in: "query", required: false, schema: { type: "integer", minimum: 0, maximum: 10, default: 8 } },
+            { name: "sort", in: "query", required: false, schema: { type: "string", enum: ["best", "top", "new", "old", "controversial", "qa"], default: "best" }, description: "Use top when the owner asks for the top/highest-scored comment." },
           ],
           responses: { "200": okResponse },
         },

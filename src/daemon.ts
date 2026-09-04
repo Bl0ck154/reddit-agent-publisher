@@ -34,7 +34,7 @@ async function dispatch(method: string, p: any) {
     case "pending": return service.pending();
     case "reddit_rules": return service.rules(p.account ?? "default", p.subreddit);
     case "reddit_flairs": return service.flairs(p.account ?? "default", p.subreddit);
-    case "reddit_thread": return redditRead(() => redditReader.thread(p.account ?? "default", p.url, p.limit ?? 50, p.depth ?? 6, p.context ?? 8));
+    case "reddit_thread": return redditRead(() => redditReader.thread(p.account ?? "default", p.url, p.limit ?? 50, p.depth ?? 6, p.context ?? 8, p.sort ?? "best"));
     case "reddit_activity": return redditRead(() => redditReader.activity(p.account ?? "default", p.limit ?? 25, p.kind ?? "all"));
     case "reddit_inbox": return redditRead(() => redditReader.inbox(p.account ?? "default", p.unread_only ?? true, p.limit ?? 25));
     case "reddit_notifications": return redditRead(() => redditReader.notifications(p.account ?? "default", p.unread_only ?? true, p.limit ?? 25));

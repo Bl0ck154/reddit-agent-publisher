@@ -35,6 +35,7 @@ const ThreadQuery = z.object({
   limit:z.coerce.number().int().min(1).max(100).default(50),
   depth:z.coerce.number().int().min(1).max(10).default(6),
   context:z.coerce.number().int().min(0).max(10).default(8),
+  sort:z.enum(["best","top","new","old","controversial","qa"]).default("best"),
 });
 const ActivityQuery = z.object({
   account:Account, kind:z.enum(["all","posts","comments"]).default("all"),

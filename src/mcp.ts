@@ -46,7 +46,7 @@ server.registerTool("reddit_rules", { description:"Read subreddit rules through 
 server.registerTool("reddit_flairs", { description:"Read available post flair from the Reddit create-post UI; no API credentials required and nothing is submitted.", inputSchema:{subreddit:z.string().regex(/^[A-Za-z0-9_]{2,21}$/),account} }, p=>run("reddit_flairs",p));
 server.registerTool("reddit_thread_get", {
   description:"Read a Reddit post plus nested comment context from an exact post/comment permalink. Read-only.",
-  inputSchema:{url:redditUrl,account,limit:z.number().int().min(1).max(100).default(50),depth:z.number().int().min(1).max(10).default(6),context:z.number().int().min(0).max(10).default(8)}
+  inputSchema:{url:redditUrl,account,limit:z.number().int().min(1).max(100).default(50),depth:z.number().int().min(1).max(10).default(6),context:z.number().int().min(0).max(10).default(8),sort:z.enum(["best","top","new","old","controversial","qa"]).default("best")}
 }, p=>run("reddit_thread",p));
 server.registerTool("reddit_my_activity", {
   description:"Read the authenticated owner's recent Reddit posts/comments. Read-only.",

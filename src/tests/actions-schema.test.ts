@@ -21,6 +21,8 @@ test("read and preview actions are non-consequential but real publish always req
   assert.equal(schema.paths["/v1/reddit/rules"].get["x-openai-isConsequential"],false);
   assert.equal(schema.paths["/v1/reddit/flairs"].get["x-openai-isConsequential"],false);
   assert.equal(schema.paths["/v1/reddit/thread"].get["x-openai-isConsequential"],false);
+  const threadSort=schema.paths["/v1/reddit/thread"].get.parameters.find((p:any)=>p.name==="sort");
+  assert.deepEqual(threadSort.schema.enum,["best","top","new","old","controversial","qa"]);
   assert.equal(schema.paths["/v1/reddit/activity"].get["x-openai-isConsequential"],false);
   assert.equal(schema.paths["/v1/reddit/inbox"].get["x-openai-isConsequential"],false);
   assert.equal(schema.paths["/v1/reddit/notifications"].get["x-openai-isConsequential"],false);
