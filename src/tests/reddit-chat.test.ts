@@ -159,6 +159,18 @@ test("incoming Reddit message request is treated as the existing direct room",()
   assert.equal(normalized.conversations[0].latest_message.body,"hey");
 });
 
+test("Reddit message request identifies inviter from sender of our membership invite",()=>{
+  const sync={rooms:{invite:{"!request-sender:reddit.com":{invite_state:{events:[
+    {type:"m.room.member",state_key:"@t2_me:reddit.com",sender:"@t2_peer:reddit.com",content:{membership:"invite"}},
+    {type:"com.reddit.chat.type",state_key:"",sender:"@t2_peer:reddit.com",origin_server_ts:1234,content:{type:"direct",body:"hello from request"}},
+  ]}}}}};
+  const normalized=normalizeRedditChatSync(sync,"@t2_me:reddit.com",false,25) as any;
+  assert.equal(normalized.conversations[0].status,"request");
+  assert.equal(normalized.conversations[0].participants[0].matrix_user_id,"@t2_peer:reddit.com");
+  assert.equal(normalized.conversations[0].latest_message.body,"hello from request");
+  assert.equal(findDirectRoomForPeer(sync,"@t2_me:reddit.com","@t2_peer:reddit.com"),"!request-sender:reddit.com");
+});
+
 test("reading an incoming message request does not join or accept it",async()=>{
   const chat:any=new (await import("../reddit-chat.js")).RedditChat({} as any);
   chat.withMatrix=async(_account:string,work:any)=>work({token:"tok",userId:"@t2_me:reddit.com"});

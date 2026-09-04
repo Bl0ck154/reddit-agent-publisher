@@ -108,6 +108,16 @@ function memberIds(events: JsonObject[]): string[] {
   return ids;
 }
 
+function invitePeerId(events: JsonObject[], ownUserId: string): string | undefined {
+  const selfInvite=events.find(event=>event.type==="m.room.member" && text(event.state_key)===ownUserId && text(object(event.content)?.membership)==="invite");
+  const sender=text(selfInvite?.sender);
+  if (sender && sender!==ownUserId && MATRIX_USER.test(sender)) return sender;
+  const statePeer=memberIds(events).find(id=>id!==ownUserId && MATRIX_USER.test(id));
+  if (statePeer) return statePeer;
+  const fallback=text(events.find(event=>event.type==="m.room.member")?.sender);
+  return fallback && fallback!==ownUserId && MATRIX_USER.test(fallback) ? fallback : undefined;
+}
+
 function memberNames(events: JsonObject[]): Map<string, string> {
   const names = new Map<string, string>();
   for (const event of events) {
@@ -174,7 +184,8 @@ export function normalizeRedditChatSync(syncValue: unknown, ownUserId: string, u
     const room = object(raw) ?? {};
     const inviteEvents = array(object(room.invite_state)?.events).map(object).filter(Boolean) as JsonObject[];
     const names = memberNames(inviteEvents);
-    const peers = memberIds(inviteEvents).filter(id=>id!==ownUserId);
+    const inviter=invitePeerId(inviteEvents,ownUserId);
+    const peers = inviter ? [inviter] : memberIds(inviteEvents).filter(id=>id!==ownUserId);
     const messages = inviteEvents.map(event=>normalizeMessage(event,names,ownUserId,true)).filter(Boolean) as JsonObject[];
     const latest = [...messages].sort((a,b)=>Date.parse(String(b.created_at ?? 0))-Date.parse(String(a.created_at ?? 0)))[0];
     conversations.push({ room_id:roomId, participants:peers.map(id=>({matrix_user_id:id,username:names.get(id)})), unread_count:1, latest_message:latest, updated_at:latest?.created_at, status:"request" });
@@ -208,6 +219,8 @@ export function findDirectChatForPeer(syncValue: unknown, ownUserId: string, pee
     if (!isRedditChatRoomId(roomId)) continue;
     const room = object(raw) ?? {};
     const events = array(object(room.invite_state)?.events).map(object).filter(Boolean) as JsonObject[];
+    const inviter=invitePeerId(events,ownUserId);
+    if (inviter === peerUserId) return {room_id:roomId,status:"request"};
     const peers = memberIds(events).filter(id=>id!==ownUserId);
     if (peers.length === 1 && peers[0] === peerUserId) return {room_id:roomId,status:"request"};
   }
