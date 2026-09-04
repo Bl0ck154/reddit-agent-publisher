@@ -39,13 +39,9 @@ export function normalizeRedditRecipientProfile(value: unknown, expectedUsername
 }
 export function redditDirectRoomCreateBody(ownUserId: string, peerUserId: string): JsonObject {
   if (!MATRIX_USER.test(ownUserId) || !MATRIX_USER.test(peerUserId) || ownUserId === peerUserId) throw new Error("Two distinct Reddit Matrix user ids are required");
-  return {
-    visibility:"private",
-    preset:"trusted_private_chat",
-    is_direct:true,
-    invite:[peerUserId],
-    initial_state:[{ type:"com.reddit.chat.type", state_key:"", content:{ type:"direct", participants:[ownUserId,peerUserId] } }],
-  };
+  // Match Reddit Chat's current web client exactly. The server-side `reddit_dm`
+  // preset owns the direct-room state (including Reddit-specific room metadata).
+  return { preset:"reddit_dm", invite:[peerUserId] };
 }
 
 function decodeHtmlAttribute(value: string): string {
@@ -118,13 +114,14 @@ function memberNames(events: JsonObject[]): Map<string, string> {
   return names;
 }
 
-function normalizeMessage(event: JsonObject, names: Map<string,string>, ownUserId: string): JsonObject | undefined {
-  if (event.type !== "m.room.message") return undefined;
+function normalizeMessage(event: JsonObject, names: Map<string,string>, ownUserId: string, allowInvitePreview = false): JsonObject | undefined {
   const content = object(event.content);
-  if (content?.msgtype !== "m.text") return undefined;
-  const body = text(content.body);
+  const ordinaryText = event.type === "m.room.message" && content?.msgtype === "m.text";
+  const invitePreview = allowInvitePreview && typeof content?.body === "string" && content.body.trim();
+  if (!ordinaryText && !invitePreview) return undefined;
+  const body = text(content?.body);
   const sender = text(event.sender);
-  const eventId = text(event.event_id);
+  const eventId = text(event.event_id) ?? (invitePreview ? `invite-preview:${event.type}:${String(event.state_key ?? sender ?? "unknown")}` : undefined);
   if (!body || !sender || !eventId) return undefined;
   return {
     event_id: eventId,
@@ -133,6 +130,7 @@ function normalizeMessage(event: JsonObject, names: Map<string,string>, ownUserI
     from_me: sender === ownUserId,
     body,
     created_at: iso(event.origin_server_ts),
+    ...(ordinaryText ? {} : { preview_only:true, event_type:event.type }),
   };
 }
 
@@ -171,7 +169,9 @@ export function normalizeRedditChatSync(syncValue: unknown, ownUserId: string, u
     const inviteEvents = array(object(room.invite_state)?.events).map(object).filter(Boolean) as JsonObject[];
     const names = memberNames(inviteEvents);
     const peers = memberIds(inviteEvents).filter(id=>id!==ownUserId);
-    conversations.push({ room_id:roomId, participants:peers.map(id=>({matrix_user_id:id,username:names.get(id)})), unread_count:1, status:"request" });
+    const messages = inviteEvents.map(event=>normalizeMessage(event,names,ownUserId,true)).filter(Boolean) as JsonObject[];
+    const latest = [...messages].sort((a,b)=>Date.parse(String(b.created_at ?? 0))-Date.parse(String(a.created_at ?? 0)))[0];
+    conversations.push({ room_id:roomId, participants:peers.map(id=>({matrix_user_id:id,username:names.get(id)})), unread_count:1, latest_message:latest, updated_at:latest?.created_at, status:"request" });
   }
 
   conversations.sort((a,b)=>Date.parse(String(b.updated_at ?? 0))-Date.parse(String(a.updated_at ?? 0)));
@@ -179,23 +179,37 @@ export function normalizeRedditChatSync(syncValue: unknown, ownUserId: string, u
 }
 
 
-export function findDirectRoomForPeer(syncValue: unknown, ownUserId: string, peerUserId: string): string | undefined {
+export type RedditDirectRoomMatch = { room_id:string; status:"joined"|"request" };
+
+export function findDirectChatForPeer(syncValue: unknown, ownUserId: string, peerUserId: string): RedditDirectRoomMatch | undefined {
   if (!MATRIX_USER.test(peerUserId)) throw new Error("A Reddit Matrix user id is required");
   const sync = object(syncValue) ?? {};
   const direct = directPeers(sync);
   const joined = object(object(sync.rooms)?.join) ?? {};
   for (const [roomId, raw] of Object.entries(joined)) {
     if (!isRedditChatRoomId(roomId)) continue;
-    if ((direct.get(roomId) ?? []).includes(peerUserId)) return roomId;
+    if ((direct.get(roomId) ?? []).includes(peerUserId)) return {room_id:roomId,status:"joined"};
     const room = object(raw) ?? {};
     const events = [
       ...array(object(room.state)?.events).map(object).filter(Boolean) as JsonObject[],
       ...array(object(room.timeline)?.events).map(object).filter(Boolean) as JsonObject[],
     ];
     const peers = memberIds(events).filter(id=>id!==ownUserId);
-    if (peers.length === 1 && peers[0] === peerUserId) return roomId;
+    if (peers.length === 1 && peers[0] === peerUserId) return {room_id:roomId,status:"joined"};
+  }
+  const invited = object(object(sync.rooms)?.invite) ?? {};
+  for (const [roomId, raw] of Object.entries(invited)) {
+    if (!isRedditChatRoomId(roomId)) continue;
+    const room = object(raw) ?? {};
+    const events = array(object(room.invite_state)?.events).map(object).filter(Boolean) as JsonObject[];
+    const peers = memberIds(events).filter(id=>id!==ownUserId);
+    if (peers.length === 1 && peers[0] === peerUserId) return {room_id:roomId,status:"request"};
   }
   return undefined;
+}
+
+export function findDirectRoomForPeer(syncValue: unknown, ownUserId: string, peerUserId: string): string | undefined {
+  return findDirectChatForPeer(syncValue, ownUserId, peerUserId)?.room_id;
 }
 
 export function normalizeRedditChatMessages(value: unknown, ownUserId: string): JsonObject[] {
@@ -224,9 +238,17 @@ export class RedditChat {
     this.roomId(roomId);
     const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
     return this.withMatrix(account, async session => {
+      const sync = object(await this.sync(session.token)) ?? {};
+      const invited = object(object(sync.rooms)?.invite) ?? {};
+      if (invited[roomId]) {
+        const events = array(object(object(invited[roomId])?.invite_state)?.events).map(object).filter(Boolean) as JsonObject[];
+        const names = memberNames(events);
+        const messages = events.map(event=>normalizeMessage(event,names,session.userId,true)).filter(Boolean).slice(-safeLimit) as JsonObject[];
+        return { room_id:roomId, matrix_user_id:session.userId, status:"request", messages, count:messages.length, fetched_at:new Date().toISOString(), backend:"reddit-matrix", note:"This is a pending Reddit message request. Reading it did not accept the request; sending a reply will accept/join it first." };
+      }
       const payload = await this.request(session.token, `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/messages`, "GET", undefined, { dir:"b", limit:String(safeLimit) });
       const messages = normalizeRedditChatMessages(payload, session.userId);
-      return { room_id:roomId, matrix_user_id:session.userId, messages, count:messages.length, fetched_at:new Date().toISOString(), backend:"reddit-matrix" };
+      return { room_id:roomId, matrix_user_id:session.userId, status:"joined", messages, count:messages.length, fetched_at:new Date().toISOString(), backend:"reddit-matrix" };
     });
   }
 
@@ -235,8 +257,12 @@ export class RedditChat {
     return this.withMatrix(account, async session => {
       if (profile.matrix_user_id === session.userId) throw new Error("RECIPIENT_SELF: cannot start a Reddit Chat with the connected account itself");
       const sync = await this.sync(session.token);
-      const existing = findDirectRoomForPeer(sync, session.userId, String(profile.matrix_user_id));
-      return { ...profile, existing_room_id:existing, will_create_message_request:!existing, backend:"reddit-matrix" };
+      let existing = findDirectChatForPeer(sync, session.userId, String(profile.matrix_user_id));
+      if (!existing) {
+        const serverRoom = await this.directRoomFromServer(session.token, String(profile.matrix_user_id));
+        if (serverRoom) existing = {room_id:serverRoom,status:"joined"};
+      }
+      return { ...profile, existing_room_id:existing?.room_id, existing_room_status:existing?.status, will_accept_message_request:existing?.status==="request", will_create_message_request:!existing, backend:"reddit-matrix" };
     });
   }
 
@@ -248,38 +274,56 @@ export class RedditChat {
       const peer = String(profile.matrix_user_id);
       if (peer === session.userId) throw new Error("RECIPIENT_SELF: cannot start a Reddit Chat with the connected account itself");
       const sync = await this.sync(session.token);
-      let roomId = findDirectRoomForPeer(sync, session.userId, peer);
+      let match = findDirectChatForPeer(sync, session.userId, peer);
+      if (!match) {
+        const serverRoom = await this.directRoomFromServer(session.token, peer);
+        if (serverRoom) match = {room_id:serverRoom,status:"joined"};
+      }
+      let roomId = match?.room_id;
+      let roomStatus = match?.status;
       let created = false;
       const warnings: string[] = [];
+      if (roomId && roomStatus === "request") {
+        await this.joinRoom(session.token, roomId);
+        roomStatus = "joined";
+        warnings.push("Accepted the existing Reddit message request before sending the reply; no duplicate chat was created.");
+      }
       if (!roomId) {
         let createdPayload: unknown;
         try {
           createdPayload = await this.request(session.token, "/_matrix/client/v3/createRoom", "POST", redditDirectRoomCreateBody(session.userId, peer));
         } catch (error:any) {
           const failure = String(error?.message ?? error);
-          if (/HTTP 403|M_FORBIDDEN|forbidden/i.test(failure)) throw new Error("RECIPIENT_CHAT_UNAVAILABLE: Reddit does not allow starting a chat with this user");
-          if (/^REDDIT_CHAT_FAILED:|^RATE_LIMITED:|^AUTH_REQUIRED:|Matrix authentication/i.test(failure)) throw error;
-          try {
-            const recoveredSync = await this.sync(session.token);
-            roomId = findDirectRoomForPeer(recoveredSync, session.userId, peer);
-          } catch { /* preserve the ambiguous create result below */ }
-          if (!roomId) throw new Error("PUBLISH_RESULT_AMBIGUOUS: Reddit Chat room creation may have succeeded but its result could not be verified; automatic retry is stopped to avoid creating a duplicate message request");
-          warnings.push("Recovered an already-created Reddit Chat room after an interrupted create response; no duplicate room was created.");
+          const matrixPayload = object(error?.matrixPayload);
+          const existingFromError = text(matrixPayload?.["com.reddit.existing_room_id"]);
+          if (existingFromError && isRedditChatRoomId(existingFromError)) {
+            roomId = existingFromError;
+            roomStatus = "joined";
+            warnings.push("Reddit reported an existing direct room during room creation; reused it instead of creating a duplicate.");
+          } else {
+            if (/HTTP 403|M_FORBIDDEN|forbidden/i.test(failure)) throw new Error("RECIPIENT_CHAT_UNAVAILABLE: Reddit does not allow starting a chat with this user");
+            if (/^RATE_LIMITED:|^AUTH_REQUIRED:|Matrix authentication/i.test(failure)) throw error;
+            const status = Number(error?.matrixStatus ?? failure.match(/Matrix returned HTTP (\d+)/i)?.[1] ?? 0);
+            if (status && status < 500 && status !== 408) throw error;
+            try {
+              const serverRoom = await this.directRoomFromServer(session.token, peer);
+              if (serverRoom) { roomId=serverRoom; roomStatus="joined"; }
+              if (!roomId) {
+                const recoveredSync = await this.sync(session.token);
+                match = findDirectChatForPeer(recoveredSync, session.userId, peer);
+                roomId = match?.room_id;
+                roomStatus = match?.status;
+              }
+              if (roomId && roomStatus === "request") { await this.joinRoom(session.token, roomId); roomStatus="joined"; }
+            } catch { /* preserve the ambiguous create result below */ }
+            if (!roomId) throw new Error("PUBLISH_RESULT_AMBIGUOUS: Reddit Chat room creation may have succeeded but its result could not be verified; automatic retry is stopped to avoid creating a duplicate message request");
+            warnings.push("Recovered an already-created Reddit Chat room after an interrupted create response; no duplicate room was created.");
+          }
         }
         if (createdPayload !== undefined) {
           roomId = text(object(createdPayload)?.room_id);
           if (!roomId || !isRedditChatRoomId(roomId)) throw new Error("PUBLISH_RESULT_AMBIGUOUS: Reddit Chat room creation did not return a valid room id");
           created = true;
-          try {
-            const directEvent = array(object(object(sync)?.account_data)?.events).map(object).filter(Boolean).find((event:any)=>event.type==="m.direct") as JsonObject | undefined;
-            const content = { ...(object(directEvent?.content) ?? {}) };
-            const rooms = array(content[peer]).map(text).filter(Boolean) as string[];
-            if (!rooms.includes(roomId)) rooms.push(roomId);
-            content[peer] = rooms;
-            await this.request(session.token, `/_matrix/client/v3/user/${encodeURIComponent(session.userId)}/account_data/m.direct`, "PUT", content);
-          } catch {
-            warnings.push("Reddit Chat was created, but the Matrix m.direct account-data marker could not be updated; the room itself is still valid.");
-          }
         }
       }
       if (!roomId) throw new Error("PUBLISH_RESULT_AMBIGUOUS: Reddit Chat target room could not be resolved");
@@ -293,8 +337,12 @@ export class RedditChat {
     const message = body.trim();
     if (!message || message.length > 40_000) throw new Error("Reddit chat reply body must contain 1-40000 characters");
     return this.withMatrix(account, async session => {
+      const sync = object(await this.sync(session.token)) ?? {};
+      const invited = object(object(sync.rooms)?.invite) ?? {};
+      let acceptedMessageRequest = false;
+      if (invited[roomId]) { await this.joinRoom(session.token, roomId); acceptedMessageRequest = true; }
       const eventId = await this.sendInRoom(session.token, roomId, message, transactionKey);
-      return { status:"PUBLISHED", room_id:roomId, event_id:eventId, backend:"reddit-matrix" };
+      return { status:"PUBLISHED", room_id:roomId, event_id:eventId, accepted_message_request:acceptedMessageRequest, backend:"reddit-matrix" };
     });
   }
 
@@ -317,9 +365,34 @@ export class RedditChat {
       if (expectedFullname && String(profile.fullname).toLowerCase() !== String(expectedFullname).toLowerCase()) throw new Error("RECIPIENT_IDENTITY_MISMATCH: the verified Reddit account id does not match the source comment");
       if (profile.is_suspended) throw new Error("RECIPIENT_CHAT_UNAVAILABLE: Reddit account is suspended");
       if (profile.is_blocked === true) throw new Error("RECIPIENT_CHAT_UNAVAILABLE: this Reddit account is blocked by the connected account");
-      if (profile.accept_chats === false) throw new Error("RECIPIENT_CHAT_UNAVAILABLE: this Reddit account is not accepting chat requests from the connected session");
+      // `accept_chats` is advisory only: Reddit has historically returned false for
+      // profiles whose authenticated web UI still exposes Start Chat. The definitive
+      // permission check is Matrix createRoom/join at publish time (403 => unavailable).
       return profile;
     } finally { this.chrome.release(account); }
+  }
+
+  private async directRoomFromServer(token: string, peerUserId: string): Promise<string | undefined> {
+    if (!MATRIX_USER.test(peerUserId)) throw new Error("A Reddit Matrix user id is required");
+    const payload = object(await this.request(token, "/_matrix/client/v3/rooms", "GET", undefined, {
+      seq:"y", with_user:peerUserId, type:"direct", include:"state,timeline",
+    })) ?? {};
+    for (const raw of array(payload.rooms)) {
+      const roomId = text(object(raw)?.room_id);
+      if (roomId && isRedditChatRoomId(roomId)) return roomId;
+    }
+    return undefined;
+  }
+
+  private async joinRoom(token: string, roomId: string): Promise<void> {
+    this.roomId(roomId);
+    try {
+      await this.request(token, `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/join`, "POST", {});
+    } catch (error:any) {
+      const failure=String(error?.message ?? error);
+      if (/HTTP 403|M_FORBIDDEN|forbidden/i.test(failure)) throw new Error("RECIPIENT_CHAT_UNAVAILABLE: the Reddit message request can no longer be accepted");
+      throw error;
+    }
   }
 
   private async sync(token: string): Promise<unknown> {
@@ -404,9 +477,16 @@ export class RedditChat {
     for (const [key,value] of Object.entries(query ?? {})) url.searchParams.set(key,value);
     const response = await fetch(url, { method, headers:{ Authorization:`Bearer ${token}`, ...(body===undefined?{}:{"content-type":"application/json"}) }, body:body===undefined?undefined:JSON.stringify(body) });
     const payload = await response.json().catch(()=>({}));
-    if (response.status === 401) throw new Error(`Matrix authentication failed: ${String(object(payload)?.errcode ?? "HTTP 401")}`);
-    if (response.status === 429) throw new Error("RATE_LIMITED: Reddit Chat temporarily rate-limited the request");
-    if (!response.ok) throw new Error(`REDDIT_CHAT_FAILED: Matrix returned HTTP ${response.status} ${String(object(payload)?.errcode ?? "")}: ${String(object(payload)?.error ?? "unknown error")}`);
+    if (!response.ok) {
+      let message: string;
+      if (response.status === 401) message = `Matrix authentication failed: ${String(object(payload)?.errcode ?? "HTTP 401")}`;
+      else if (response.status === 429) message = "RATE_LIMITED: Reddit Chat temporarily rate-limited the request";
+      else message = `REDDIT_CHAT_FAILED: Matrix returned HTTP ${response.status} ${String(object(payload)?.errcode ?? "")}: ${String(object(payload)?.error ?? "unknown error")}`;
+      const error:any = new Error(message);
+      error.matrixStatus = response.status;
+      error.matrixPayload = payload;
+      throw error;
+    }
     return payload;
   }
 }

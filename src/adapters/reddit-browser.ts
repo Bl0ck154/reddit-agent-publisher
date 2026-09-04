@@ -365,7 +365,12 @@ export class RedditBrowserAdapter implements Adapter {
         return { summary: { backend:"reddit-matrix", action:d.action, account:d.account, target:{room_id:roomId}, content:{body:String(d.content.body)}, conversation:context, notice:"The exact Reddit Chat room and reply text were verified. Nothing has been sent yet." } };
       }
       const recipient = await this.chat.directTarget(d.account, String(d.target.recipient_username), d.target.recipient_fullname ? String(d.target.recipient_fullname) : undefined);
-      return { summary: { backend:"reddit-matrix", action:d.action, account:d.account, target:{recipient_username:recipient.username,recipient_fullname:recipient.fullname,matrix_user_id:recipient.matrix_user_id,existing_room_id:recipient.existing_room_id}, content:{body:String(d.content.body)}, notice:recipient.existing_room_id ? "The Reddit recipient identity and existing direct chat were verified. Nothing has been sent yet." : "The Reddit recipient identity was verified. No existing direct chat was found; publishing will create a native Reddit direct-chat/message request and send this text. Preview itself creates nothing." } };
+      const notice = recipient.existing_room_status === "request"
+        ? "The Reddit recipient identity and an existing incoming message request were verified. Nothing has been accepted or sent yet; publishing will accept/join that request and send this text without creating a duplicate chat."
+        : recipient.existing_room_id
+          ? "The Reddit recipient identity and existing joined direct chat were verified. Nothing has been sent yet."
+          : "The Reddit recipient identity was verified. No existing direct chat was found; publishing will create a native Reddit direct-chat/message request and send this text. Preview itself creates nothing.";
+      return { summary: { backend:"reddit-matrix", action:d.action, account:d.account, target:{recipient_username:recipient.username,recipient_fullname:recipient.fullname,matrix_user_id:recipient.matrix_user_id,existing_room_id:recipient.existing_room_id,existing_room_status:recipient.existing_room_status,will_accept_message_request:Boolean(recipient.will_accept_message_request),will_create_message_request:Boolean(recipient.will_create_message_request)}, content:{body:String(d.content.body)}, notice } };
     }
     const page = await this.page(d.account, true);
     try {
