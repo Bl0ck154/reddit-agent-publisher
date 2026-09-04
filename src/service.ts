@@ -8,6 +8,10 @@ import { Store } from "./db.js";
 import { PublisherError } from "./errors.js";
 import { DraftState, PrepareInput, envelope, type Draft, type ResultEnvelope } from "./types.js";
 
+export function isFinalPublishFailure(message: string): boolean {
+  return /^(?:PUBLISH_RESULT_AMBIGUOUS|RECIPIENT_NOT_FOUND|RECIPIENT_IDENTITY_MISMATCH|RECIPIENT_SELF|RECIPIENT_CHAT_UNAVAILABLE):/.test(String(message));
+}
+
 export function redditChatMutationFingerprint(d: Draft): string | undefined {
   if (d.adapter !== "reddit" || d.action !== "send_chat_message") return undefined;
   const body=String(d.content.body ?? "").trim();
@@ -163,7 +167,7 @@ export class PublisherService {
       this.lastMutation.set(lock, Date.now());
       return envelope({ state: "PUBLISHED", adapter: d.adapter, account: d.account, draft_id: id, revision: d.revision,
         side_effect: { performed: true }, result: r, warnings: r.warnings ?? [] });
-    } catch (e: any) { const current=this.store.getDraft(id); if(current?.state==="PUBLISHING") this.store.updateState(id,String(e.message).startsWith("PUBLISH_RESULT_AMBIGUOUS")?"FAILED_FINAL":"FAILED_RETRYABLE"); this.store.audit("publication.failed", actor, id, { error: String(e.message).slice(0, 300) }); return this.fail(e, id); }
+    } catch (e: any) { const current=this.store.getDraft(id); if(current?.state==="PUBLISHING") this.store.updateState(id,isFinalPublishFailure(String(e.message))?"FAILED_FINAL":"FAILED_RETRYABLE"); this.store.audit("publication.failed", actor, id, { error: String(e.message).slice(0, 300) }); return this.fail(e, id); }
     finally { this.locks.delete(lock); }
   }
 

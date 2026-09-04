@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import type { Adapter } from "../adapters/base.js";
 import { ensureState, type Config } from "../config.js";
-import { PublisherService } from "../service.js";
+import { isFinalPublishFailure, PublisherService } from "../service.js";
 import type { Draft } from "../types.js";
 import { PublisherError } from "../errors.js";
 
@@ -60,4 +60,10 @@ test("unfinished Reddit DM mutation intent survives PublisherService restart",as
   const reopened=new PublisherService(config); const second=reopened.store.acquireMutationIntent({fingerprint:fp,adapter:"reddit",account:"owner-main",action:"send_chat_message",draft_id:"draft-b"});
   assert.equal(second.reused,true); assert.equal(second.completed,false); assert.equal(second.transaction_key,first.transaction_key);
   reopened.store.db.close(); fs.rmSync(stateDir,{recursive:true,force:true});
+});
+
+
+test("terminal Reddit DM recipient/identity failures are final while auth/rate/network remain retryable",()=>{
+  for(const code of ["PUBLISH_RESULT_AMBIGUOUS","RECIPIENT_NOT_FOUND","RECIPIENT_IDENTITY_MISMATCH","RECIPIENT_SELF","RECIPIENT_CHAT_UNAVAILABLE"]) assert.equal(isFinalPublishFailure(`${code}: example`),true,code);
+  for(const code of ["AUTH_REQUIRED","RATE_LIMITED","REDDIT_CHAT_FAILED","SITE_CHANGED"]) assert.equal(isFinalPublishFailure(`${code}: example`),false,code);
 });
