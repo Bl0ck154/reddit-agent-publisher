@@ -468,11 +468,13 @@ export class RedditChat {
   private async directRoomFromServer(token: string, peerUserId: string): Promise<string | undefined> {
     if (!MATRIX_USER.test(peerUserId)) throw new Error("A Reddit Matrix user id is required");
     const payload = object(await this.request(token, "/_matrix/client/v3/rooms", "GET", undefined, {
-      seq:"y", with_user:peerUserId, type:"direct", include:"state,timeline",
+      with_user:peerUserId, type:"direct", include:"state,timeline",
     })) ?? {};
     for (const raw of array(payload.rooms)) {
-      const roomId = text(object(raw)?.room_id);
-      if (roomId && isRedditChatRoomId(roomId)) return roomId;
+      const room=object(raw);
+      const roomId=text(room?.room_id);
+      const membership=text(room?.membership);
+      if (roomId && isRedditChatRoomId(roomId) && (membership === "join" || membership === "invite")) return roomId;
     }
     return undefined;
   }

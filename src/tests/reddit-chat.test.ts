@@ -363,6 +363,24 @@ test("Reddit-specific room creation rate and feature-gate codes are classified s
   await assert.rejects(()=>make("future_unknown_client_code"),/SITE_CHANGED/);
 });
 
+test("server room-list lookup ignores left direct rooms and creates a fresh DM",async()=>{
+  const chat:any=new (await import("../reddit-chat.js")).RedditChat({} as any);
+  chat.resolveRecipientProfile=async()=>({username:"TopCommenter",fullname:"t2_peer",matrix_user_id:"@t2_peer:reddit.com",accept_chats:true});
+  chat.withMatrix=async(_account:string,work:any)=>work({token:"tok",userId:"@t2_me:reddit.com"});
+  chat.sync=async()=>({rooms:{join:{}}});
+  const calls:any[]=[];
+  chat.request=async(_token:string,path:string,method:string,body:any,query:any)=>{
+    calls.push({path,method,body,query});
+    if(path==="/_matrix/client/v3/rooms") return {rooms:[{room_id:"!left:reddit.com",membership:"leave"}]};
+    if(path==="/_matrix/client/v3/createRoom") return {room_id:"!fresh:reddit.com"};
+    if(path.includes("/send/m.room.message/")) return {event_id:"$fresh"};
+    return {};
+  };
+  const result=await chat.sendDirectMessage("owner-main","TopCommenter","hello","t2_peer","draft-left-room");
+  assert.equal(result.room_id,"!fresh:reddit.com");
+  assert.equal(calls.filter(c=>c.path==="/_matrix/client/v3/createRoom").length,1);
+});
+
 test("server room-list lookup reuses an inactive direct room before createRoom",async()=>{
   const chat:any=new (await import("../reddit-chat.js")).RedditChat({} as any);
   chat.resolveRecipientProfile=async()=>({username:"TopCommenter",fullname:"t2_peer",matrix_user_id:"@t2_peer:reddit.com",accept_chats:true});
@@ -371,7 +389,7 @@ test("server room-list lookup reuses an inactive direct room before createRoom",
   const calls:any[]=[];
   chat.request=async(_token:string,path:string,method:string,body:any,query:any)=>{
     calls.push({path,method,body,query});
-    if(path==="/_matrix/client/v3/rooms") return {rooms:[{room_id:"!inactive:reddit.com"}]};
+    if(path==="/_matrix/client/v3/rooms") return {rooms:[{room_id:"!inactive:reddit.com",membership:"join"}]};
     if(path.includes("/send/m.room.message/")) return {event_id:"$inactive"};
     return {};
   };
@@ -379,7 +397,7 @@ test("server room-list lookup reuses an inactive direct room before createRoom",
   assert.equal(result.room_id,"!inactive:reddit.com");
   assert.equal(calls.some(c=>c.path==="/_matrix/client/v3/createRoom"),false);
   const lookup=calls.find(c=>c.path==="/_matrix/client/v3/rooms");
-  assert.deepEqual(lookup.query,{seq:"y",with_user:"@t2_peer:reddit.com",type:"direct",include:"state,timeline"});
+  assert.deepEqual(lookup.query,{with_user:"@t2_peer:reddit.com",type:"direct",include:"state,timeline"});
 });
 
 test("createRoom com.reddit.existing_room_id is reused exactly like the current Reddit client",async()=>{
