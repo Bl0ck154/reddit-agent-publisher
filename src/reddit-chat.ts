@@ -315,11 +315,14 @@ export class RedditChat {
           const failure = String(error?.message ?? error);
           const matrixPayload = object(error?.matrixPayload);
           const existingFromError = text(matrixPayload?.["com.reddit.existing_room_id"]);
+          const redditErrorCode = text(matrixPayload?.["com.reddit.error.code"]);
           if (existingFromError && isRedditChatRoomId(existingFromError)) {
             roomId = existingFromError;
             roomStatus = "joined";
             warnings.push("Reddit reported an existing direct room during room creation; reused it instead of creating a duplicate.");
           } else {
+            if (/^rate\.score_room_creation_limit(?:_ln)?$/i.test(redditErrorCode ?? "")) throw new Error(`RATE_LIMITED: Reddit Chat room creation is temporarily limited (${redditErrorCode})`);
+            if (redditErrorCode === "feature_gated") throw new Error("RECIPIENT_CHAT_UNAVAILABLE: Reddit has feature-gated starting this chat for the connected account");
             if (/HTTP 403|M_FORBIDDEN|forbidden/i.test(failure)) throw new Error("RECIPIENT_CHAT_UNAVAILABLE: Reddit does not allow starting a chat with this user");
             if (/^RATE_LIMITED:|^AUTH_REQUIRED:|Matrix authentication/i.test(failure)) throw error;
             const status = Number(error?.matrixStatus ?? failure.match(/Matrix returned HTTP (\d+)/i)?.[1] ?? 0);

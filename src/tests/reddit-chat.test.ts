@@ -235,6 +235,21 @@ test("HTTP 503 after createRoom is recovered through sync before any retry can c
 });
 
 
+test("Reddit-specific room creation rate and feature-gate codes are classified safely",async()=>{
+  const make=async(code:string)=>{
+    const chat:any=new (await import("../reddit-chat.js")).RedditChat({} as any);
+    chat.resolveRecipientProfile=async()=>({username:"TopCommenter",fullname:"t2_peer",matrix_user_id:"@t2_peer:reddit.com"});
+    chat.withMatrix=async(_account:string,work:any)=>work({token:"tok",userId:"@t2_me:reddit.com"});
+    chat.sync=async()=>({rooms:{join:{},invite:{}},account_data:{events:[]}});
+    chat.directRoomFromServer=async()=>undefined;
+    chat.request=async(_token:string,path:string)=>{ if(path==="/_matrix/client/v3/createRoom"){const e:any=new Error("REDDIT_CHAT_FAILED: Matrix returned HTTP 400"); e.matrixStatus=400; e.matrixPayload={"com.reddit.error.code":code}; throw e;} return {}; };
+    return chat.sendDirectMessage("owner-main","TopCommenter","hello","t2_peer","txn");
+  };
+  await assert.rejects(()=>make("rate.score_room_creation_limit"),/RATE_LIMITED/);
+  await assert.rejects(()=>make("rate.score_room_creation_limit_ln"),/RATE_LIMITED/);
+  await assert.rejects(()=>make("feature_gated"),/RECIPIENT_CHAT_UNAVAILABLE/);
+});
+
 test("server room-list lookup reuses an inactive direct room before createRoom",async()=>{
   const chat:any=new (await import("../reddit-chat.js")).RedditChat({} as any);
   chat.resolveRecipientProfile=async()=>({username:"TopCommenter",fullname:"t2_peer",matrix_user_id:"@t2_peer:reddit.com",accept_chats:true});
