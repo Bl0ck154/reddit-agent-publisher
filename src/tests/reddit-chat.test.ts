@@ -169,7 +169,7 @@ test("existing direct room is found by m.direct or one-to-one membership",()=>{
 });
 
 
-test("direct-message send creates a native room once, marks m.direct, then sends with stable txn",async()=>{
+test("direct-message send creates one server-native direct room and sends with stable txn",async()=>{
   const chat:any=new (await import("../reddit-chat.js")).RedditChat({} as any);
   chat.resolveRecipientProfile=async()=>({username:"TopCommenter",fullname:"t2_peer",matrix_user_id:"@t2_peer:reddit.com",accept_chats:true});
   chat.withMatrix=async(_account:string,work:any)=>work({token:"tok",userId:"@t2_me:reddit.com"});
