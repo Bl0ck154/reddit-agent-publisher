@@ -124,8 +124,12 @@ function memberNames(events: JsonObject[]): Map<string, string> {
     if (event.type !== "m.room.member") continue;
     const userId = text(event.state_key);
     const content = object(event.content);
+    const relations = object(object(event.unsigned)?.["m.relations"]);
+    const redditProfile = object(relations?.["com.reddit.profile"]);
+    const redditUsername = text(redditProfile?.username);
     const display = text(content?.displayname);
-    if (userId && display) names.set(userId, display.replace(/^u\//i, ""));
+    const username = redditUsername ?? display;
+    if (userId && username) names.set(userId, username.replace(/^u\//i, ""));
   }
   return names;
 }
@@ -242,6 +246,7 @@ export function normalizeRedditChatMessages(value: unknown, ownUserId: string): 
 export class RedditChat {
   private chrome: ExternalChrome;
   private tokens = new Map<string, TokenCache>();
+  private profileNames = new Map<string, string>();
 
   constructor(private config: Config) { this.chrome = new ExternalChrome(config, "reddit"); }
 
@@ -249,7 +254,9 @@ export class RedditChat {
     return this.withMatrix(account, async session => {
       const filter = JSON.stringify({ room:{ timeline:{ limit:20 }, state:{ lazy_load_members:true } } });
       const sync = await this.request(session.token, "/_matrix/client/v3/sync", "GET", undefined, { timeout:"0", filter });
-      return { ...normalizeRedditChatSync(sync, session.userId, unreadOnly, limit), fetched_at:new Date().toISOString(), backend:"reddit-matrix" };
+      const normalized = normalizeRedditChatSync(sync, session.userId, unreadOnly, limit);
+      await this.enrichConversationNames(session.token, normalized);
+      return { ...normalized, fetched_at:new Date().toISOString(), backend:"reddit-matrix" };
     });
   }
 
@@ -263,10 +270,12 @@ export class RedditChat {
         const events = array(object(object(invited[roomId])?.invite_state)?.events).map(object).filter(Boolean) as JsonObject[];
         const names = memberNames(events);
         const messages = events.map(event=>normalizeMessage(event,names,session.userId,true)).filter(Boolean).slice(-safeLimit) as JsonObject[];
+        await this.enrichMessageSenderNames(session.token, messages);
         return { room_id:roomId, matrix_user_id:session.userId, status:"request", messages, count:messages.length, fetched_at:new Date().toISOString(), backend:"reddit-matrix", note:"This is a pending Reddit message request. Reading it did not accept the request; sending a reply will accept/join it first." };
       }
       const payload = await this.request(session.token, `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/messages`, "GET", undefined, { dir:"b", limit:String(safeLimit) });
       const messages = normalizeRedditChatMessages(payload, session.userId);
+      await this.enrichMessageSenderNames(session.token, messages);
       return { room_id:roomId, matrix_user_id:session.userId, status:"joined", messages, count:messages.length, fetched_at:new Date().toISOString(), backend:"reddit-matrix" };
     });
   }
@@ -392,6 +401,37 @@ export class RedditChat {
       // permission check is Matrix createRoom/join at publish time (403 => unavailable).
       return profile;
     } finally { this.chrome.release(account); }
+  }
+
+
+  private async matrixProfileName(token: string, userId: string): Promise<string | undefined> {
+    if (!MATRIX_USER.test(userId)) return undefined;
+    const cached=this.profileNames.get(userId); if(cached) return cached;
+    try {
+      const profile=object(await this.request(token, `/_matrix/client/v3/profile/${encodeURIComponent(userId)}`, "GET"));
+      const name=text(profile?.displayname)?.replace(/^u\//i, "");
+      if(name) this.profileNames.set(userId,name);
+      return name;
+    } catch(error:any) {
+      const failure=String(error?.message ?? error);
+      if (/M_UNKNOWN_TOKEN|HTTP 401|Matrix authentication/i.test(failure)) throw error;
+      return undefined;
+    }
+  }
+
+  private async enrichConversationNames(token: string, payload: JsonObject): Promise<void> {
+    const participants=array(payload.conversations).flatMap(raw=>array(object(raw)?.participants).map(object).filter(Boolean)) as JsonObject[];
+    const missing=[...new Set(participants.filter(p=>!text(p.username)).map(p=>text(p.matrix_user_id)).filter((id): id is string=>Boolean(id && MATRIX_USER.test(id))))];
+    const resolved=new Map<string,string>();
+    await Promise.all(missing.map(async id=>{const name=await this.matrixProfileName(token,id); if(name) resolved.set(id,name);}));
+    for(const participant of participants){const id=text(participant.matrix_user_id); if(id && !text(participant.username) && resolved.has(id)) participant.username=resolved.get(id);}
+  }
+
+  private async enrichMessageSenderNames(token: string, messages: JsonObject[]): Promise<void> {
+    const missing=[...new Set(messages.filter(m=>text(m.sender)===text(m.sender_id)).map(m=>text(m.sender_id)).filter((id): id is string=>Boolean(id && MATRIX_USER.test(id))))];
+    const resolved=new Map<string,string>();
+    await Promise.all(missing.map(async id=>{const name=await this.matrixProfileName(token,id); if(name) resolved.set(id,name);}));
+    for(const message of messages){const id=text(message.sender_id); if(id && text(message.sender)===id && resolved.has(id)) message.sender=resolved.get(id);}
   }
 
   private async directRoomFromServer(token: string, peerUserId: string): Promise<string | undefined> {

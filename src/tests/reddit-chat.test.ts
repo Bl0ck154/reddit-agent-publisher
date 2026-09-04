@@ -51,6 +51,23 @@ test("Reddit browser self identity maps to the exact Matrix sender and rejects m
   assert.throws(()=>redditMatrixUserIdFromSelfProfile({kind:"t2",data:{name:"EfficiencyGood4815"}}),/AUTH_REQUIRED/);
 });
 
+test("Reddit member profile relation username is preferred over displayname",()=>{
+  const sync={rooms:{join:{"!profile-rel:reddit.com":{state:{events:[
+    {type:"m.room.member",state_key:"@t2_peer:reddit.com",content:{membership:"join",displayname:"Stale Display"},unsigned:{"m.relations":{"com.reddit.profile":{username:"u/RealUsername"}}}},
+  ]},timeline:{events:[]},unread_notifications:{notification_count:0}}}},account_data:{events:[{type:"m.direct",content:{"@t2_peer:reddit.com":["!profile-rel:reddit.com"]}}]}};
+  const normalized=normalizeRedditChatSync(sync,"@t2_me:reddit.com",false,25) as any;
+  assert.equal(normalized.conversations[0].participants[0].username,"RealUsername");
+});
+
+test("chat list fills a missing lazy-loaded username from Matrix profile",async()=>{
+  const chat:any=new (await import("../reddit-chat.js")).RedditChat({} as any);
+  chat.withMatrix=async(_account:string,work:any)=>work({token:"tok",userId:"@t2_me:reddit.com"});
+  const sync={rooms:{join:{"!lazy:reddit.com":{state:{events:[]},timeline:{events:[{type:"m.room.message",event_id:"$e",sender:"@t2_peer:reddit.com",origin_server_ts:1,content:{msgtype:"m.text",body:"hello"}}]},unread_notifications:{notification_count:1}}}},account_data:{events:[{type:"m.direct",content:{"@t2_peer:reddit.com":["!lazy:reddit.com"]}}]}};
+  chat.request=async(_token:string,path:string)=>path.includes("/profile/")?{displayname:"u/ProfilePeer"}:sync;
+  const result=await chat.conversations("owner-main",false,25);
+  assert.equal(result.conversations[0].participants[0].username,"ProfilePeer");
+});
+
 test("Reddit comment author fullname maps deterministically to Matrix user id",()=>{
   assert.equal(redditMatrixUserIdFromFullname("t2_AbC123"),"@t2_abc123:reddit.com");
   assert.throws(()=>redditMatrixUserIdFromFullname("u/example"),/t2_/);
