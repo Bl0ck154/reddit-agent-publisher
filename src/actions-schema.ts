@@ -67,7 +67,7 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
           operationId: "getRedditThread",
           "x-openai-isConsequential": false,
           summary: "Read a Reddit post and its comment context",
-          description: "Read-only. Use an exact Reddit post or comment permalink. Returns the post, nested comments, the targeted comment when applicable, plus deterministic top_comment/newest_comment/oldest_comment shortcuts for top-level comments. top_comment means the highest Reddit score among returned top-level comments. Comment shortcuts include author and author_fullname (t2_ user id) so an agent can safely address the exact author in a direct-message action.",
+          description: "Read-only. Use an exact Reddit post or comment permalink. Returns the post, nested comments, the targeted comment when applicable, plus deterministic top_comment/newest_comment/oldest_comment shortcuts for top-level comments. top_comment means the highest Reddit score among returned top-level comments. When the owner asks for the actual top/highest-scored comment, explicitly set sort=top; the default best sort is not equivalent. Comment shortcuts include author and author_fullname (t2_ user id) so an agent can safely address the exact author in a direct-message action.",
           parameters: [
             { name: "url", in: "query", required: true, schema: { type: "string", format: "uri" } },
             { name: "account", in: "query", required: false, schema: account },
