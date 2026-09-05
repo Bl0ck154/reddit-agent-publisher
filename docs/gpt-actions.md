@@ -74,6 +74,7 @@ Read-only:
 - `getRedditRules`
 - `getRedditFlairs`
 - `getRedditThread`
+- `getRedditChatAttachment`
 - `getMyRedditActivity`
 - `getRedditInbox`
 
@@ -107,6 +108,14 @@ Typical flow:
 ### Reddit images
 
 `previewRedditPost` accepts 1–4 ChatGPT conversation images through `openaiFileIdRefs`. Files are downloaded immediately into the protected local artifacts directory, validated by payload signature, and used only for the matching preview.
+
+### Reddit Chat media and files
+
+`getRedditChatMessages` exposes Matrix-backed Reddit Chat attachments as structured metadata for `m.image`, `m.file`, `m.video`, and `m.audio`, including the exact message `event_id`, filename, MIME type, declared size, dimensions/duration when present, and the Reddit MXC reference. Arbitrary MXC URLs are never accepted as download targets. `getRedditChatAttachment` requires the exact `room_id` + `event_id` returned by the read tools, downloads only `mxc://reddit.com/...`, caps downloads at 20 MiB, and stores them in the protected Publisher artifacts tree. Reading/downloading a pending message request does not join or accept it.
+
+For GPT Actions, `getRedditChatAttachment` returns a five-minute signed `download_url`. Eligible non-image/video files up to 10 MiB are also exposed through the special `openaiFileResponse` field so ChatGPT can present them as returned conversation files. Images/video still receive the signed download link. MCP clients use `reddit_chat_attachment_get` followed by chunk-capable `artifact_get`.
+
+`previewRedditChatReply`, `publishRedditChatReply`, `previewRedditDirectMessage`, and `publishRedditDirectMessage` accept exactly one current-conversation attachment through `openaiFileIdRefs`; text is optional when a file is supplied. Preview downloads/binds the ChatGPT file into protected local storage but does not upload it to Reddit. Consequential publish uploads through Reddit's current Matrix media endpoint and sends the appropriate `m.image`, `m.file`, `m.video`, or `m.audio` event. When text accompanies media, Publisher uses separate stable transaction IDs for media and text so retries do not duplicate either event. Reddit may independently return `SENDER_MEDIA_RESTRICTED` when its own media endpoint disallows uploads for the connected account/device; this is a terminal media-send result rather than a reason for blind retries.
 
 ### Reddit text formatting
 

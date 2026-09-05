@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
-import { extractRedditChatLocalStorageCredentials, extractRedditChatToken, normalizeRedditShredditChatToken, findDirectRoomForPeer, isRedditChatRoomId, normalizeRedditChatMessages, normalizeRedditChatSync, normalizeRedditRecipientProfile, redditDirectRoomCreateBody, redditMatrixUserIdFromFullname, redditMatrixUserIdFromSelfProfile } from "../reddit-chat.js";
+import { extractRedditChatLocalStorageCredentials, extractRedditChatToken, normalizeRedditShredditChatToken, redditChatAttachmentFromEvent, findDirectRoomForPeer, isRedditChatRoomId, normalizeRedditChatMessages, normalizeRedditChatSync, normalizeRedditRecipientProfile, redditDirectRoomCreateBody, redditMatrixUserIdFromFullname, redditMatrixUserIdFromSelfProfile } from "../reddit-chat.js";
 
 test("Reddit Chat bootstrap token is extracted without persisting credentials",()=>{
   const parsed=extractRedditChatToken('<html><rs-app token="{&quot;token&quot;:&quot;abc.def.sig&quot;,&quot;expires&quot;:1770000000000}"></rs-app></html>');
@@ -102,6 +105,73 @@ test("Reddit Chat room history is chronological and marks own messages",()=>{
   assert.equal(messages[1].from_me,true);
 });
 
+
+test("Reddit Chat normalizes image/file attachment metadata",()=>{
+  const payload={state:[{type:"m.room.member",state_key:"@t2_peer:reddit.com",content:{displayname:"Peer"}}],chunk:[
+    {type:"m.room.message",event_id:"$file",sender:"@t2_peer:reddit.com",origin_server_ts:2000,content:{msgtype:"m.file",body:"report.pdf",filename:"report.pdf",url:"mxc://reddit.com/media-file",info:{mimetype:"application/pdf",size:321}}},
+    {type:"m.room.message",event_id:"$image",sender:"@t2_peer:reddit.com",origin_server_ts:1000,content:{msgtype:"m.image",body:"photo.jpg",url:"mxc://reddit.com/media-image",info:{mimetype:"image/jpeg",size:123,w:640,h:480}}},
+  ]};
+  const messages=normalizeRedditChatMessages(payload,"@t2_me:reddit.com") as any[];
+  assert.deepEqual(messages.map(x=>x.event_id),["$image","$file"]);
+  assert.equal(messages[0].msgtype,"m.image");
+  assert.deepEqual(messages[0].attachments[0],{kind:"image",msgtype:"m.image",filename:"photo.jpg",mime_type:"image/jpeg",size:123,width:640,height:480,duration_ms:undefined,mxc_url:"mxc://reddit.com/media-image",downloadable:true});
+  assert.equal(messages[1].attachments[0].filename,"report.pdf");
+  assert.equal(messages[1].attachments[0].downloadable,true);
+  const foreign=redditChatAttachmentFromEvent({type:"m.room.message",content:{msgtype:"m.file",body:"x",url:"mxc://evil.invalid/id",info:{mimetype:"text/plain",size:1}}}) as any;
+  assert.equal(foreign.downloadable,false);
+});
+
+test("Reddit Chat downloads only the exact attachment event into protected artifacts",async()=>{
+  const stateDir=fs.mkdtempSync(path.join(os.tmpdir(),"publisher-chat-media-"));
+  try {
+    const chat:any=new (await import("../reddit-chat.js")).RedditChat({stateDir} as any);
+    chat.withMatrix=async(_account:string,work:any)=>work({token:"tok",userId:"@t2_me:reddit.com"});
+    chat.sync=async()=>({rooms:{join:{"!room:reddit.com":{}}}});
+    const requested:string[]=[];
+    chat.request=async(_token:string,requestPath:string)=>{requested.push(requestPath); return {type:"m.room.message",event_id:"$fileevent",sender:"@t2_peer:reddit.com",content:{msgtype:"m.file",body:"report.pdf",filename:"report.pdf",url:"mxc://reddit.com/media123",info:{mimetype:"application/pdf",size:3}}};};
+    chat.downloadMedia=async(_token:string,mxc:string)=>{assert.equal(mxc,"mxc://reddit.com/media123"); return {data:Buffer.from("pdf"),mime_type:"application/pdf"};};
+    const result=await chat.attachment("owner-main","!room:reddit.com","$fileevent");
+    assert.equal(result.name,"report.pdf"); assert.equal(result.size,3); assert.equal(result.read_only,true);
+    assert.equal(fs.readFileSync(result.artifact_path,"utf8"),"pdf");
+    assert.match(result.artifact_path,/artifacts\/reddit-chat\//);
+    assert.equal(requested.length,1); assert.match(requested[0],/\/event\/\%24fileevent$/);
+  } finally { fs.rmSync(stateDir,{recursive:true,force:true}); }
+});
+
+test("downloading an attachment from a pending message request does not join it",async()=>{
+  const stateDir=fs.mkdtempSync(path.join(os.tmpdir(),"publisher-request-media-"));
+  try {
+    const chat:any=new (await import("../reddit-chat.js")).RedditChat({stateDir} as any);
+    chat.withMatrix=async(_account:string,work:any)=>work({token:"tok",userId:"@t2_me:reddit.com"});
+    chat.sync=async()=>({rooms:{invite:{"!request:reddit.com":{invite_state:{events:[{type:"m.room.message",event_id:"$imageevent",sender:"@t2_peer:reddit.com",content:{msgtype:"m.image",body:"photo.png",url:"mxc://reddit.com/image123",info:{mimetype:"image/png",size:4}}}]}}}}});
+    chat.request=async()=>{throw new Error("attachment read must not join or fetch joined-room history");};
+    chat.downloadMedia=async()=>({data:Buffer.from("img!"),mime_type:"image/png"});
+    const result=await chat.attachment("owner-main","!request:reddit.com","$imageevent");
+    assert.equal(result.kind,"image"); assert.equal(result.size,4);
+  } finally { fs.rmSync(stateDir,{recursive:true,force:true}); }
+});
+
+test("Reddit Chat media-only and text-plus-media sends use stable separate transactions",async()=>{
+  const media={path:"/protected/file.pdf",name:"file.pdf",mime_type:"application/pdf",size:10,sha256:"sha256:abc"};
+  const run=async(body:string,key:string)=>{
+    const chat:any=new (await import("../reddit-chat.js")).RedditChat({} as any);
+    chat.withMatrix=async(_account:string,work:any)=>work({token:"tok",userId:"@t2_me:reddit.com"});
+    chat.sync=async()=>({rooms:{join:{}}});
+    chat.uploadMedia=async()=>({content_uri:"mxc://reddit.com/uploaded123"});
+    const calls:any[]=[];
+    chat.request=async(_token:string,requestPath:string,_method:string,content:any)=>{calls.push({requestPath,content}); return {event_id:`$event${calls.length}`};};
+    const result=await chat.sendMessage("owner-main","!room:reddit.com",body,key,media);
+    return {result,calls};
+  };
+  const mediaOnly=await run("","stable-media");
+  assert.equal(mediaOnly.calls.length,1); assert.match(mediaOnly.calls[0].requestPath,/publisher-stable-media$/);
+  assert.equal(mediaOnly.calls[0].content.msgtype,"m.file"); assert.equal(mediaOnly.calls[0].content.filename,"file.pdf");
+  const combined=await run("caption","stable-both");
+  assert.equal(combined.calls.length,2);
+  assert.match(combined.calls[0].requestPath,/publisher-stable-both-media$/); assert.equal(combined.calls[0].content.msgtype,"m.file");
+  assert.match(combined.calls[1].requestPath,/publisher-stable-both-text$/); assert.equal(combined.calls[1].content.msgtype,"m.text");
+  assert.equal(combined.result.media_event_id,"$event1"); assert.equal(combined.result.text_event_id,"$event2");
+});
 
 test("Reddit browser self identity maps to the exact Matrix sender and rejects malformed identity",()=>{
   assert.equal(redditMatrixUserIdFromSelfProfile({kind:"t2",data:{id:"S4315V5UP",name:"EfficiencyGood4815"}}),"@t2_s4315v5up:reddit.com");

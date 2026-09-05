@@ -195,7 +195,8 @@ export class RedditBrowserAdapter implements Adapter {
       const roomId = d.target.room_id === undefined ? "" : String(d.target.room_id);
       const recipient = d.target.recipient_username === undefined ? "" : String(d.target.recipient_username).trim();
       const body = String(d.content.body ?? "").trim();
-      if ((!roomId && !recipient) || (roomId && recipient) || !body) throw new Error("A Reddit Chat room_id OR recipient_username, plus body, are required");
+      const media=this.chatMediaFile(d);
+      if ((!roomId && !recipient) || (roomId && recipient) || (!body && !media)) throw new Error("A Reddit Chat room_id OR recipient_username, plus text and/or one attachment, are required");
       if (roomId && !isRedditChatRoomId(roomId)) throw new Error("A valid Reddit Chat room_id is required");
       if (recipient && !/^[A-Za-z0-9_-]{1,20}$/.test(recipient.replace(/^u\//i,""))) throw new Error("A valid Reddit recipient_username is required");
       if (d.target.recipient_fullname !== undefined && !/^t2_[a-z0-9]+$/i.test(String(d.target.recipient_fullname))) throw new Error("recipient_fullname must be a Reddit t2_ user id when supplied");
@@ -362,7 +363,8 @@ export class RedditBrowserAdapter implements Adapter {
       if (d.target.room_id) {
         const roomId = String(d.target.room_id);
         const context = await this.chat.room(d.account, roomId, 12);
-        return { summary: { backend:"reddit-matrix", action:d.action, account:d.account, target:{room_id:roomId}, content:{body:String(d.content.body)}, conversation:context, notice:"The exact Reddit Chat room and reply text were verified. Nothing has been sent yet." } };
+        const media=this.chatMediaFile(d);
+        return { summary: { backend:"reddit-matrix", action:d.action, account:d.account, target:{room_id:roomId}, content:{body:String(d.content.body ?? ""),...(media?{attachment:{name:media.name,mime_type:media.mime_type,size:media.size,sha256:media.sha256}}:{})}, conversation:context, notice:media?"The exact Reddit Chat room and attachment/text were verified. Nothing has been sent yet.":"The exact Reddit Chat room and reply text were verified. Nothing has been sent yet." } };
       }
       const recipient = await this.chat.directTarget(d.account, String(d.target.recipient_username), d.target.recipient_fullname ? String(d.target.recipient_fullname) : undefined);
       const notice = recipient.existing_room_status === "request"
@@ -370,7 +372,8 @@ export class RedditBrowserAdapter implements Adapter {
         : recipient.existing_room_id
           ? "The Reddit recipient identity and existing joined direct chat were verified. Nothing has been sent yet."
           : "The Reddit recipient identity was verified. No existing direct chat was found; publishing will create a native Reddit direct-chat/message request and send this text. Preview itself creates nothing.";
-      return { summary: { backend:"reddit-matrix", action:d.action, account:d.account, target:{recipient_username:recipient.username,recipient_fullname:recipient.fullname,matrix_user_id:recipient.matrix_user_id,existing_room_id:recipient.existing_room_id,existing_room_status:recipient.existing_room_status,will_accept_message_request:Boolean(recipient.will_accept_message_request),will_create_message_request:Boolean(recipient.will_create_message_request)}, content:{body:String(d.content.body)}, notice } };
+      const media=this.chatMediaFile(d);
+      return { summary: { backend:"reddit-matrix", action:d.action, account:d.account, target:{recipient_username:recipient.username,recipient_fullname:recipient.fullname,matrix_user_id:recipient.matrix_user_id,existing_room_id:recipient.existing_room_id,existing_room_status:recipient.existing_room_status,will_accept_message_request:Boolean(recipient.will_accept_message_request),will_create_message_request:Boolean(recipient.will_create_message_request)}, content:{body:String(d.content.body ?? ""),...(media?{attachment:{name:media.name,mime_type:media.mime_type,size:media.size,sha256:media.sha256}}:{})}, notice:media?`${notice} The prepared attachment is bound to this preview.`:notice } };
     }
     const page = await this.page(d.account, true);
     try {
@@ -399,9 +402,10 @@ export class RedditBrowserAdapter implements Adapter {
   async publish(d: Draft): Promise<PublishData> {
     if (d.action === "send_chat_message") {
       const transactionKey=d.execution?.idempotency_key ?? d.id;
+      const media=this.chatMediaFile(d);
       const result = d.target.room_id
-        ? await this.chat.sendMessage(d.account, String(d.target.room_id), String(d.content.body), transactionKey)
-        : await this.chat.sendDirectMessage(d.account, String(d.target.recipient_username), String(d.content.body), d.target.recipient_fullname ? String(d.target.recipient_fullname) : undefined, transactionKey);
+        ? await this.chat.sendMessage(d.account, String(d.target.room_id), String(d.content.body ?? ""), transactionKey, media)
+        : await this.chat.sendDirectMessage(d.account, String(d.target.recipient_username), String(d.content.body ?? ""), d.target.recipient_fullname ? String(d.target.recipient_fullname) : undefined, transactionKey, media);
       return { status:"PUBLISHED", external_id:String(result.event_id), warnings:Array.isArray(result.warnings)?result.warnings:[],
         idempotency_alias_target:result.room_id ? `room:${String(result.room_id)}` : undefined };
     }
@@ -714,6 +718,21 @@ export class RedditBrowserAdapter implements Adapter {
     if (finalTag !== "textarea") throw new PublisherError("REDDIT_MARKDOWN_UNAVAILABLE", "Reddit did not expose a Markdown textarea after switching editor. Nothing was published.");
     await target.fill(body);
     return target;
+  }
+
+  private chatMediaFile(d: Draft): MediaFile | undefined {
+    const raw=d.content.media_files;
+    if(raw===undefined) return undefined;
+    if(!Array.isArray(raw) || raw.length!==1) throw new PublisherError("REDDIT_CHAT_MEDIA_INVALID","Reddit Chat currently supports exactly one prepared attachment per publish action.");
+    const value=raw[0];
+    if(!value || typeof value!=="object" || Array.isArray(value)) throw new PublisherError("REDDIT_CHAT_MEDIA_INVALID","Reddit Chat attachment metadata is invalid.");
+    const file=value as Record<string,unknown>; const requested=String(file.path??"");
+    const roots=["gpt-files","local-files","reddit-chat"].map(name=>path.resolve(this.config.stateDir,"artifacts",name)+path.sep);
+    let resolved:string; try{resolved=fs.realpathSync(requested);}catch{throw new PublisherError("REDDIT_CHAT_MEDIA_MISSING","Prepared Reddit Chat attachment is no longer available. Attach it again and create a fresh preview.");}
+    if(!roots.some(root=>resolved.startsWith(root))) throw new PublisherError("REDDIT_CHAT_MEDIA_FORBIDDEN","Reddit Chat attachments must come from a protected publisher media directory.");
+    const stat=fs.statSync(resolved); if(!stat.isFile() || stat.size<1 || stat.size>20*1024*1024) throw new PublisherError("REDDIT_CHAT_MEDIA_INVALID","Prepared Reddit Chat attachment has an invalid size.");
+    const mime=String(file.mime_type??"application/octet-stream").toLowerCase(); if(!/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(mime)) throw new PublisherError("REDDIT_CHAT_MEDIA_INVALID","Prepared Reddit Chat attachment has an invalid MIME type.");
+    return {path:resolved,name:String(file.name??path.basename(resolved)),mime_type:mime,size:stat.size,sha256:String(file.sha256??"")};
   }
 
   private mediaFiles(d: Draft): MediaFile[] {

@@ -1,4 +1,9 @@
 import crypto from "node:crypto";
+import dns from "node:dns/promises";
+import https from "node:https";
+import net from "node:net";
+import fs from "node:fs";
+import path from "node:path";
 import type { Page } from "playwright-core";
 import type { Config } from "./config.js";
 import { ExternalChrome } from "./external-chrome.js";
@@ -10,6 +15,37 @@ const MATRIX_HOME = "https://matrix.redditspace.com";
 const CHAT_ROOM = /^![^\s:]{1,220}:reddit\.com$/i;
 const MATRIX_USER = /^@t2_([a-z0-9]+):reddit\.com$/i;
 const REDDIT_USER = /^[A-Za-z0-9_-]{1,20}$/;
+const CHAT_MEDIA_TYPES = new Set(["m.image","m.file","m.video","m.audio"]);
+const MAX_CHAT_MEDIA_BYTES = 20 * 1024 * 1024;
+
+export type RedditChatMediaFile = { path:string; name:string; mime_type:string; size:number; sha256:string };
+function isPublicMediaAddress(address:string):boolean {
+  const kind=net.isIP(address);
+  if(kind===4){const [a,b]=address.split(".").map(Number);return !(a===0||a===10||a===127||a>=224||(a===100&&b>=64&&b<=127)||(a===169&&b===254)||(a===172&&b>=16&&b<=31)||(a===192&&b===168));}
+  if(kind===6){const value=address.toLowerCase();if(value.startsWith("::ffff:"))return isPublicMediaAddress(value.slice(7));return /^[23][0-9a-f]{3}:/.test(value);}
+  return false;
+}
+
+async function requestRedditMediaUrl(urlValue:string,token:string,redirects=0):Promise<{status:number;data:Buffer;mime_type?:string}> {
+  if(redirects>3) throw new Error("REDDIT_CHAT_ATTACHMENT_UNAVAILABLE: Reddit media redirected too many times");
+  let url:URL; try{url=new URL(urlValue);}catch{throw new Error("REDDIT_CHAT_ATTACHMENT_UNAVAILABLE: Reddit media returned an invalid URL");}
+  if(url.protocol!=="https:"||url.username||url.password||(url.port&&url.port!=="443")) throw new Error("REDDIT_CHAT_ATTACHMENT_UNAVAILABLE: Reddit media redirect was not ordinary HTTPS");
+  const addresses=await dns.lookup(url.hostname,{all:true,verbatim:true});
+  const selected=addresses.find(entry=>isPublicMediaAddress(entry.address));
+  if(!selected||addresses.some(entry=>!isPublicMediaAddress(entry.address))) throw new Error("REDDIT_CHAT_ATTACHMENT_UNAVAILABLE: Reddit media host did not resolve exclusively to public addresses");
+  const matrixHost=url.hostname.toLowerCase()==="matrix.redditspace.com";
+  return new Promise((resolve,reject)=>{
+    const req=https.request(url,{method:"GET",headers:{Accept:"*/*",...(matrixHost?{Authorization:`Bearer ${token}`}:{})},servername:url.hostname,lookup:((_hostname:string,_options:unknown,cb:(err:NodeJS.ErrnoException|null,address:string,family:number)=>void)=>cb(null,selected.address,selected.family)) as any},res=>{
+      const status=res.statusCode??0;
+      if(status>=300&&status<400){const location=res.headers.location;res.resume();if(!location){reject(new Error("REDDIT_CHAT_ATTACHMENT_UNAVAILABLE: Reddit media redirect had no Location"));return;}void requestRedditMediaUrl(new URL(location,url).toString(),token,redirects+1).then(resolve,reject);return;}
+      const declared=Number(res.headers["content-length"]??0); if(declared>MAX_CHAT_MEDIA_BYTES){res.resume();reject(new Error(`REDDIT_CHAT_ATTACHMENT_TOO_LARGE: attachment exceeds ${MAX_CHAT_MEDIA_BYTES} bytes`));return;}
+      const chunks:Buffer[]=[];let total=0;res.on("data",chunk=>{const part=Buffer.from(chunk);total+=part.length;if(total>MAX_CHAT_MEDIA_BYTES){req.destroy(new Error(`REDDIT_CHAT_ATTACHMENT_TOO_LARGE: attachment exceeds ${MAX_CHAT_MEDIA_BYTES} bytes`));return;}chunks.push(part);});
+      res.on("end",()=>resolve({status,data:Buffer.concat(chunks),mime_type:Array.isArray(res.headers["content-type"])?res.headers["content-type"][0]:res.headers["content-type"]}));
+    });
+    req.setTimeout(25_000,()=>req.destroy(new Error("REDDIT_CHAT_FAILED: Reddit media download timed out")));req.on("error",reject);req.end();
+  });
+}
+
 
 function object(value: unknown): JsonObject | undefined {
   return value && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : undefined;
@@ -160,12 +196,41 @@ function memberNames(events: JsonObject[]): Map<string, string> {
   return names;
 }
 
+export function redditChatAttachmentFromEvent(event: JsonObject): JsonObject | undefined {
+  if (event.type !== "m.room.message") return undefined;
+  const content=object(event.content);
+  const msgtype=text(content?.msgtype);
+  if (!msgtype || !CHAT_MEDIA_TYPES.has(msgtype)) return undefined;
+  const uri=text(content?.url);
+  const info=object(content?.info) ?? {};
+  const filename=text(content?.filename) ?? text(content?.body) ?? "reddit-chat-file";
+  const mxc = uri && /^mxc:\/\/reddit\.com\/[^/?#\s]{1,512}$/i.test(uri) ? uri : undefined;
+  return {
+    kind:msgtype.slice(2), msgtype, filename, mime_type:text(info.mimetype) ?? "application/octet-stream",
+    size:number(info.size), width:number(info.w), height:number(info.h), duration_ms:number(info.duration),
+    mxc_url:uri, downloadable:Boolean(mxc),
+  };
+}
+
+function parseRedditMxc(value: string): {server:string;mediaId:string} {
+  const match=String(value ?? "").match(/^mxc:\/\/(reddit\.com)\/([^/?#\s]{1,512})$/i);
+  if(!match) throw new Error("REDDIT_CHAT_ATTACHMENT_UNAVAILABLE: attachment is not hosted on Reddit Matrix media");
+  return {server:match[1].toLowerCase(),mediaId:match[2]};
+}
+
+function safeAttachmentName(value: unknown): string {
+  const base=path.basename(String(value || "reddit-chat-file")).replace(/[^A-Za-z0-9._ -]+/g,"_").slice(0,120);
+  return base || "reddit-chat-file";
+}
+
 function normalizeMessage(event: JsonObject, names: Map<string,string>, ownUserId: string, allowInvitePreview = false): JsonObject | undefined {
   const content = object(event.content);
-  const ordinaryText = event.type === "m.room.message" && content?.msgtype === "m.text";
+  const msgtype=text(content?.msgtype);
+  const ordinaryText = event.type === "m.room.message" && msgtype === "m.text";
+  const media = redditChatAttachmentFromEvent(event);
   const invitePreview = allowInvitePreview && typeof content?.body === "string" && content.body.trim();
-  if (!ordinaryText && !invitePreview) return undefined;
-  const body = text(content?.body);
+  if (!ordinaryText && !media && !invitePreview) return undefined;
+  const body = text(content?.body) ?? (media ? String(media.filename) : undefined);
   const sender = text(event.sender);
   const eventId = text(event.event_id) ?? (invitePreview ? `invite-preview:${event.type}:${String(event.state_key ?? sender ?? "unknown")}` : undefined);
   if (!body || !sender || !eventId) return undefined;
@@ -175,8 +240,10 @@ function normalizeMessage(event: JsonObject, names: Map<string,string>, ownUserI
     sender: names.get(sender) ?? sender,
     from_me: sender === ownUserId,
     body,
+    ...(msgtype?{msgtype}:{}),
+    ...(media?{attachments:[media]}:{}),
     created_at: iso(event.origin_server_ts),
-    ...(ordinaryText ? {} : { preview_only:true, event_type:event.type }),
+    ...((ordinaryText || media) ? {} : { preview_only:true, event_type:event.type }),
   };
 }
 
@@ -306,6 +373,40 @@ export class RedditChat {
     });
   }
 
+  async attachment(account: string, roomId: string, eventId: string): Promise<JsonObject> {
+    this.roomId(roomId);
+    if(!/^\$[^\s]{1,512}$/.test(String(eventId))) throw new Error("REDDIT_CHAT_ATTACHMENT_INVALID: an exact Matrix event_id from reddit_chat_get is required");
+    return this.withMatrix(account, async session=>{
+      let event:JsonObject|undefined;
+      const sync=object(await this.sync(session.token)) ?? {};
+      const invited=object(object(sync.rooms)?.invite) ?? {};
+      if(invited[roomId]) {
+        const events=array(object(object(invited[roomId])?.invite_state)?.events).map(object).filter(Boolean) as JsonObject[];
+        event=events.find(item=>text(item.event_id)===eventId);
+      } else {
+        try { event=object(await this.request(session.token,`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/event/${encodeURIComponent(eventId)}`,"GET")); }
+        catch(error:any){
+          const failure=String(error?.message ?? error);
+          if(/HTTP 404|M_NOT_FOUND/i.test(failure)) throw new Error("REDDIT_CHAT_ATTACHMENT_NOT_FOUND: the exact attachment event is no longer available");
+          throw error;
+        }
+      }
+      if(!event) throw new Error("REDDIT_CHAT_ATTACHMENT_NOT_FOUND: the exact attachment event is not visible in this Reddit Chat");
+      const attachment=redditChatAttachmentFromEvent(event);
+      if(!attachment || !attachment.downloadable || !attachment.mxc_url) throw new Error("REDDIT_CHAT_ATTACHMENT_UNAVAILABLE: the selected Reddit Chat event has no downloadable Reddit-hosted attachment");
+      const declared=number(attachment.size);
+      if(declared!==undefined && declared>MAX_CHAT_MEDIA_BYTES) throw new Error(`REDDIT_CHAT_ATTACHMENT_TOO_LARGE: attachment is ${declared} bytes; the current safe download limit is ${MAX_CHAT_MEDIA_BYTES}`);
+      const downloaded=await this.downloadMedia(session.token,String(attachment.mxc_url));
+      if(downloaded.data.length>MAX_CHAT_MEDIA_BYTES) throw new Error(`REDDIT_CHAT_ATTACHMENT_TOO_LARGE: attachment exceeds the ${MAX_CHAT_MEDIA_BYTES}-byte safe download limit`);
+      const dir=path.join(this.config.stateDir,"artifacts","reddit-chat",crypto.createHash("sha256").update(`${roomId}|${eventId}`).digest("hex").slice(0,32));
+      fs.mkdirSync(dir,{recursive:true,mode:0o700}); fs.chmodSync(dir,0o700);
+      const name=safeAttachmentName(attachment.filename);
+      const filePath=path.join(dir,name);
+      fs.writeFileSync(filePath,downloaded.data,{mode:0o600});
+      return {room_id:roomId,event_id:eventId,artifact_path:filePath,name,mime_type:downloaded.mime_type ?? attachment.mime_type ?? "application/octet-stream",size:downloaded.data.length,sha256:`sha256:${crypto.createHash("sha256").update(downloaded.data).digest("hex")}`,kind:attachment.kind,source:"reddit-chat",read_only:true};
+    });
+  }
+
   async directTarget(account: string, username: string, expectedFullname?: string): Promise<JsonObject> {
     const profile = await this.resolveRecipientProfile(account, username, expectedFullname);
     return this.withMatrix(account, async session => {
@@ -320,9 +421,9 @@ export class RedditChat {
     });
   }
 
-  async sendDirectMessage(account: string, username: string, body: string, expectedFullname?: string, transactionKey?: string): Promise<JsonObject> {
+  async sendDirectMessage(account: string, username: string, body: string, expectedFullname?: string, transactionKey?: string, media?: RedditChatMediaFile): Promise<JsonObject> {
     const message = body.trim();
-    if (!message || message.length > 40_000) throw new Error("Reddit direct-message body must contain 1-40000 characters");
+    if ((!message && !media) || message.length > 40_000) throw new Error("Reddit direct message requires text and/or one attachment; text may not exceed 40000 characters");
     const profile = await this.resolveRecipientProfile(account, username, expectedFullname);
     return this.withMatrix(account, async session => {
       const peer = String(profile.matrix_user_id);
@@ -389,22 +490,22 @@ export class RedditChat {
         }
       }
       if (!roomId) throw new Error("PUBLISH_RESULT_AMBIGUOUS: Reddit Chat target room could not be resolved");
-      const eventId = await this.sendInRoom(session.token, roomId, message, transactionKey);
-      return { status:"PUBLISHED", room_id:roomId, event_id:eventId, recipient:profile, created_conversation:created, warnings, backend:"reddit-matrix" };
+      const sent = await this.sendContentInRoom(session.token, roomId, message, transactionKey, media);
+      return { status:"PUBLISHED", room_id:roomId, event_id:sent.event_id, text_event_id:sent.text_event_id, media_event_id:sent.media_event_id, recipient:profile, created_conversation:created, warnings, backend:"reddit-matrix" };
     });
   }
 
-  async sendMessage(account: string, roomId: string, body: string, transactionKey?: string): Promise<JsonObject> {
+  async sendMessage(account: string, roomId: string, body: string, transactionKey?: string, media?: RedditChatMediaFile): Promise<JsonObject> {
     this.roomId(roomId);
     const message = body.trim();
-    if (!message || message.length > 40_000) throw new Error("Reddit chat reply body must contain 1-40000 characters");
+    if ((!message && !media) || message.length > 40_000) throw new Error("Reddit chat reply requires text and/or one attachment; text may not exceed 40000 characters");
     return this.withMatrix(account, async session => {
       const sync = object(await this.sync(session.token)) ?? {};
       const invited = object(object(sync.rooms)?.invite) ?? {};
       let acceptedMessageRequest = false;
       if (invited[roomId]) { await this.joinRoom(session.token, roomId); acceptedMessageRequest = true; }
-      const eventId = await this.sendInRoom(session.token, roomId, message, transactionKey);
-      return { status:"PUBLISHED", room_id:roomId, event_id:eventId, accepted_message_request:acceptedMessageRequest, backend:"reddit-matrix" };
+      const sent=await this.sendContentInRoom(session.token,roomId,message,transactionKey,media);
+      return { status:"PUBLISHED", room_id:roomId, event_id:sent.event_id, text_event_id:sent.text_event_id, media_event_id:sent.media_event_id, accepted_message_request:acceptedMessageRequest, backend:"reddit-matrix" };
     });
   }
 
@@ -495,13 +596,75 @@ export class RedditChat {
     return this.request(token, "/_matrix/client/v3/sync", "GET", undefined, {timeout:"0",filter});
   }
 
-  private async sendInRoom(token: string, roomId: string, body: string, transactionKey?: string): Promise<string> {
+  private async sendContentInRoom(token:string,roomId:string,body:string,transactionKey?:string,media?:RedditChatMediaFile):Promise<{event_id:string;text_event_id?:string;media_event_id?:string}> {
+    const base=String(transactionKey ?? crypto.randomUUID());
+    let mediaEvent:string|undefined; let textEvent:string|undefined;
+    if(media){
+      const uploaded=await this.uploadMedia(token,media);
+      const msgtype=media.mime_type.startsWith("image/")?"m.image":media.mime_type.startsWith("video/")?"m.video":media.mime_type.startsWith("audio/")?"m.audio":"m.file";
+      const info:JsonObject={mimetype:media.mime_type,size:media.size};
+      const content:JsonObject={msgtype,body:media.name,url:uploaded.content_uri,info};
+      if(msgtype==="m.file") content.filename=media.name;
+      mediaEvent=await this.sendEventInRoom(token,roomId,content,body?`${base}-media`:base);
+    }
+    if(body) textEvent=await this.sendEventInRoom(token,roomId,{msgtype:"m.text",body},media?`${base}-text`:base);
+    const eventId=textEvent ?? mediaEvent;
+    if(!eventId) throw new Error("PUBLISH_RESULT_AMBIGUOUS: Reddit Chat produced no event id");
+    return {event_id:eventId,...(textEvent?{text_event_id:textEvent}:{}),...(mediaEvent?{media_event_id:mediaEvent}:{})};
+  }
+
+  private async uploadMedia(token:string,file:RedditChatMediaFile):Promise<{content_uri:string}> {
+    if(file.size<1 || file.size>MAX_CHAT_MEDIA_BYTES) throw new Error(`REDDIT_CHAT_MEDIA_INVALID: attachment must be between 1 and ${MAX_CHAT_MEDIA_BYTES} bytes`);
+    const data=fs.readFileSync(file.path);
+    if(data.length!==file.size) throw new Error("REDDIT_CHAT_MEDIA_INVALID: prepared attachment changed after preview");
+    const url=new URL("/_matrix/media/v3/upload",MATRIX_HOME); url.searchParams.set("filename",file.name);
+    const response=await fetch(url,{method:"POST",headers:{Authorization:`Bearer ${token}`,"content-type":file.mime_type || "application/octet-stream"},body:data});
+    const payload=object(await response.json().catch(()=>({}))) ?? {};
+    if(!response.ok){
+      const detail=`${text(payload.errcode) ?? ""} ${text(payload.error) ?? ""}`.trim();
+      if(response.status===401) throw new Error("Matrix authentication failed: media upload returned HTTP 401");
+      if(response.status===429) throw new Error("RATE_LIMITED: Reddit Chat temporarily rate-limited media upload");
+      if(response.status===403 || /media upload forbidden/i.test(detail)) throw new Error("SENDER_MEDIA_RESTRICTED: Reddit rejected media upload for this connected account/device");
+      if(response.status>=400 && response.status<500) throw new Error(`SITE_CHANGED: Reddit Chat media upload returned HTTP ${response.status}`);
+      throw new Error(`REDDIT_CHAT_FAILED: Reddit Chat media upload returned HTTP ${response.status}`);
+    }
+    const contentUri=text(payload.content_uri);
+    if(!contentUri) throw new Error("PUBLISH_RESULT_AMBIGUOUS: Reddit Chat media upload did not return content_uri");
+    parseRedditMxc(contentUri);
+    return {content_uri:contentUri};
+  }
+
+  private async downloadMedia(token:string,mxc:string):Promise<{data:Buffer;mime_type?:string}> {
+    const parsed=parseRedditMxc(mxc);
+    // Prefer the legacy endpoint with redirects explicitly disabled. Matrix specifies
+    // that this path must proxy the bytes itself when allow_redirect=false. If Reddit
+    // has frozen legacy media access (404), fall back to authenticated client-v1,
+    // following CDN redirects manually with DNS pinning and without leaking Bearer auth.
+    const candidates=[
+      `/_matrix/media/v3/download/${encodeURIComponent(parsed.server)}/${encodeURIComponent(parsed.mediaId)}?allow_redirect=false`,
+      `/_matrix/client/v1/media/download/${encodeURIComponent(parsed.server)}/${encodeURIComponent(parsed.mediaId)}`,
+    ];
+    let lastStatus=0;
+    for(const pathname of candidates){
+      const response=await requestRedditMediaUrl(new URL(pathname,MATRIX_HOME).toString(),token);
+      lastStatus=response.status;
+      if(response.status===404||response.status===405) continue;
+      if(response.status===401) throw new Error("Matrix authentication failed: media download returned HTTP 401");
+      if(response.status===403) throw new Error("REDDIT_CHAT_ATTACHMENT_UNAVAILABLE: Reddit denied access to this attachment");
+      if(response.status===429) throw new Error("RATE_LIMITED: Reddit Chat temporarily rate-limited media download");
+      if(response.status<200||response.status>=300) throw new Error(`REDDIT_CHAT_FAILED: Reddit media download returned HTTP ${response.status}`);
+      return {data:response.data,mime_type:response.mime_type};
+    }
+    throw new Error(`REDDIT_CHAT_ATTACHMENT_NOT_FOUND: Reddit media returned HTTP ${lastStatus||404}`);
+  }
+
+  private async sendEventInRoom(token: string, roomId: string, content:JsonObject, transactionKey?: string): Promise<string> {
     this.roomId(roomId);
     const safeKey = String(transactionKey ?? crypto.randomUUID()).replace(/[^A-Za-z0-9._~-]/g,"_").slice(0,120);
     const txn = `publisher-${safeKey}`;
     let payload: unknown;
     try {
-      payload = await this.request(token, `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${encodeURIComponent(txn)}`, "PUT", {msgtype:"m.text",body});
+      payload = await this.request(token, `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${encodeURIComponent(txn)}`, "PUT", content);
     } catch (error:any) {
       const failure=String(error?.message ?? error);
       const matrixPayload=object(error?.matrixPayload);

@@ -63,6 +63,14 @@ test("Reddit browser adapter validates an exact Reddit Chat room reply",async()=
 test("Reddit browser adapter validates a verified username direct-message target",async()=>{
   const a=new RedditBrowserAdapter(config); await a.validate({...base,action:"send_chat_message",target:{recipient_username:"TopCommenter",recipient_fullname:"t2_abc123"},content:{body:"Owner DM"}} as Draft);
 });
+test("Reddit browser adapter validates a media-only Reddit Chat attachment from protected storage",async()=>{
+  const dir=path.join(config.stateDir,"artifacts","local-files"); fs.mkdirSync(dir,{recursive:true}); const file=path.join(dir,"owner.pdf"); fs.writeFileSync(file,"pdf");
+  const a=new RedditBrowserAdapter(config); await a.validate({...base,adapter:"reddit",action:"send_chat_message",target:{room_id:"!room123:reddit.com"},content:{body:"",media_files:[{path:file,name:"owner.pdf",mime_type:"application/pdf",size:3,sha256:"sha256:test"}]}} as Draft);
+});
+test("Reddit browser adapter rejects a Chat attachment outside protected media storage",async()=>{
+  const file=path.join(config.stateDir,"outside-chat.pdf"); fs.writeFileSync(file,"pdf"); const a=new RedditBrowserAdapter(config);
+  await assert.rejects(()=>a.validate({...base,adapter:"reddit",action:"send_chat_message",target:{room_id:"!room123:reddit.com"},content:{media_files:[{path:file,name:"outside-chat.pdf",mime_type:"application/pdf",size:3,sha256:"sha256:x"}]}} as Draft),/protected publisher media directory/);
+});
 test("Reddit browser adapter rejects invented non-Reddit Chat room ids",async()=>{
   const a=new RedditBrowserAdapter(config); await assert.rejects(()=>a.validate({...base,action:"send_chat_message",target:{room_id:"!room123:evil.invalid"},content:{body:"x"}} as Draft),/valid Reddit Chat room_id/);
 });

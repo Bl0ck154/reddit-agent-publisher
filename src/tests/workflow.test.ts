@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import type { Adapter } from "../adapters/base.js";
 import { ensureState, type Config } from "../config.js";
-import { isFinalPublishFailure, PublisherService } from "../service.js";
+import { isFinalPublishFailure, redditChatMutationFingerprint, PublisherService } from "../service.js";
 import type { Draft } from "../types.js";
 import { PublisherError } from "../errors.js";
 
@@ -66,6 +66,29 @@ test("unfinished Reddit DM mutation intent survives PublisherService restart",as
 
 
 test("terminal Reddit DM recipient/identity failures are final while auth/rate/network remain retryable",()=>{
-  for(const code of ["PUBLISH_RESULT_AMBIGUOUS","SITE_CHANGED","SENDER_CHAT_RESTRICTED","RECIPIENT_NOT_FOUND","RECIPIENT_IDENTITY_MISMATCH","RECIPIENT_SELF","RECIPIENT_CHAT_UNAVAILABLE"]) assert.equal(isFinalPublishFailure(`${code}: example`),true,code);
+  for(const code of ["PUBLISH_RESULT_AMBIGUOUS","SITE_CHANGED","SENDER_CHAT_RESTRICTED","SENDER_MEDIA_RESTRICTED","RECIPIENT_NOT_FOUND","RECIPIENT_IDENTITY_MISMATCH","RECIPIENT_SELF","RECIPIENT_CHAT_UNAVAILABLE"]) assert.equal(isFinalPublishFailure(`${code}: example`),true,code);
   for(const code of ["AUTH_REQUIRED","RATE_LIMITED","REDDIT_CHAT_FAILED"]) assert.equal(isFinalPublishFailure(`${code}: example`),false,code);
+});
+
+
+test("Reddit Chat mutation fingerprint includes attachment identity",()=>{
+  const baseDraft:any={adapter:"reddit",account:"owner-main",action:"send_chat_message",target:{room_id:"!room:reddit.com"},content:{body:"same caption"}};
+  const a=redditChatMutationFingerprint({...baseDraft,content:{body:"same caption",media_files:[{name:"x.pdf",mime_type:"application/pdf",size:3,sha256:"sha256:aaa"}]}});
+  const b=redditChatMutationFingerprint({...baseDraft,content:{body:"same caption",media_files:[{name:"x.pdf",mime_type:"application/pdf",size:3,sha256:"sha256:bbb"}]}});
+  const same=redditChatMutationFingerprint({...baseDraft,content:{body:"same caption",media_files:[{name:"x.pdf",mime_type:"application/pdf",size:3,sha256:"sha256:aaa"}]}});
+  assert.notEqual(a,b); assert.equal(a,same);
+  const mediaOnly=redditChatMutationFingerprint({...baseDraft,content:{body:"",media_files:[{name:"x.pdf",mime_type:"application/pdf",size:3,sha256:"sha256:aaa"}]}}); assert.ok(mediaOnly);
+});
+
+
+test("artifact_get reads protected files in chunks without changing the full digest",async()=>{
+  const {service,stateDir}=setup();
+  const dir=path.join(stateDir,"artifacts","reddit-chat","chunk-test"); fs.mkdirSync(dir,{recursive:true});
+  const file=path.join(dir,"note.txt"); fs.writeFileSync(file,"abcdefghij");
+  const first=await service.artifact(file,2,4); assert.equal(first.ok,true); const a=first.result as any;
+  assert.equal(Buffer.from(a.base64,"base64").toString(),"cdef"); assert.equal(a.offset,2); assert.equal(a.next_offset,6); assert.equal(a.eof,false); assert.equal(a.size,10); assert.equal(a.mime_type,"text/plain");
+  const second=await service.artifact(file,6,8); assert.equal(second.ok,true); const b=second.result as any;
+  assert.equal(Buffer.from(b.base64,"base64").toString(),"ghij"); assert.equal(b.offset,6); assert.equal(b.next_offset,undefined); assert.equal(b.eof,true); assert.equal(b.sha256,a.sha256);
+  const outside=path.join(stateDir,"outside.txt"); fs.writeFileSync(outside,"nope"); const denied=await service.artifact(outside,0,4); assert.equal(denied.ok,false); assert.equal(denied.error?.code,"ARTIFACT_FORBIDDEN");
+  service.store.db.close(); fs.rmSync(stateDir,{recursive:true,force:true});
 });

@@ -10,6 +10,14 @@ const server = new McpServer({ name:"reddit-agent-publisher", version:"0.2.0" })
 const run = async (method:string, params:any) => { const r=await rpc(socket,method,{...params,actor:"mcp"}); return { content:[{type:"text" as const,text:JSON.stringify(r)}], structuredContent:r as any, isError:!r.ok }; };
 const account = z.string().default("default").describe("Internal Publisher browser-profile id, not the Reddit username. Usually omit it or leave default; use another value only when it is a configured Publisher profile id returned by status.");
 const redditUrl = z.string().url();
+const prepareProtectedChatAttachment = async (artifactPath?: string) => {
+  if (!artifactPath) return undefined;
+  const env=await rpc(socket,"artifact",{path:artifactPath,offset:0,max_bytes:1,actor:"mcp"});
+  if(!env.ok) throw new Error(env.error?.message ?? "Protected attachment is unavailable");
+  const item=env.result as any;
+  return [{path:String(item.path),name:String(item.name),mime_type:String(item.mime_type),size:Number(item.size),sha256:String(item.sha256)}];
+};
+
 
 server.registerTool("publication_prepare", { description:"Prepare exactly one owner-requested draft. This never publishes. Kept for compatibility; prefer the typed Reddit tools.", inputSchema:{ adapter:z.enum(["reddit"]),account,action:z.enum(["create_post","create_comment","send_chat_message","edit","delete"]),target:z.record(z.unknown()),content:z.record(z.unknown()),owner_command:z.literal(true) } }, p=>run("prepare",{input:p}));
 server.registerTool("publication_preview", { description:"Preview one Reddit draft in the live browser; nothing is submitted.", inputSchema:{draft_id:z.string().uuid()} }, p=>run("preview",p));
@@ -59,9 +67,19 @@ server.registerTool("reddit_inbox", {
 server.registerTool("reddit_notifications", { description:"Read reply and mention notifications without opening Reddit's bell page or marking them read.", inputSchema:{account,unread_only:z.boolean().default(true),limit:z.number().int().min(1).max(100).default(25)} }, p=>run("reddit_notifications",p));
 server.registerTool("reddit_chat_list", { description:"Read current Reddit Chat conversations/DMs. Read-only.", inputSchema:{account,unread_only:z.boolean().default(false),limit:z.number().int().min(1).max(100).default(25)} }, p=>run("reddit_chat_list",p));
 server.registerTool("reddit_chat_get", { description:"Read recent messages from one exact Reddit Chat room_id returned by reddit_chat_list. Read-only.", inputSchema:{account,room_id:z.string().min(4).max(260),limit:z.number().int().min(1).max(100).default(50)} }, p=>run("reddit_chat_get",p));
-server.registerTool("reddit_chat_reply_prepare", { description:"Prepare a reply to one exact Reddit Chat room; nothing is sent.", inputSchema:{account,room_id:z.string().min(4).max(260),body:z.string().min(1).max(40_000)} }, p=>run("prepare",{input:{adapter:"reddit",account:p.account,action:"send_chat_message",target:{room_id:p.room_id},content:{body:p.body},owner_command:true}}));
-server.registerTool("reddit_direct_message_prepare", { description:"Prepare a direct message to a verified Reddit username. Pass recipient_fullname (t2_...) when it came from a thread/comment to bind the exact account. Preview creates nothing; publish reuses or creates the native direct chat/message request.", inputSchema:{account,recipient_username:z.string().regex(/^[A-Za-z0-9_-]{1,20}$/),recipient_fullname:z.string().regex(/^t2_[a-z0-9]+$/i).optional(),body:z.string().min(1).max(40_000)} }, p=>run("prepare",{input:{adapter:"reddit",account:p.account,action:"send_chat_message",target:{recipient_username:p.recipient_username,recipient_fullname:p.recipient_fullname},content:{body:p.body},owner_command:true}}));
+server.registerTool("reddit_chat_attachment_get", {
+  description:"Download one exact media/file attachment from a Reddit Chat event. room_id and event_id must come from reddit_chat_get. Read-only; it does not accept a message request or mark anything read.",
+  inputSchema:{account,room_id:z.string().min(4).max(260),event_id:z.string().regex(/^\$\S{1,512}$/)}
+}, p=>run("reddit_chat_attachment_get",p));
+server.registerTool("reddit_chat_reply_prepare", {
+  description:"Prepare text and/or one protected attachment for one exact Reddit Chat room. Nothing is sent; room_id must come from reddit_chat_list. attachment_artifact_path must be a protected path returned/staged by Publisher, never an arbitrary server path.",
+  inputSchema:{account,room_id:z.string().min(4).max(260),body:z.string().max(40_000).optional(),attachment_artifact_path:z.string().optional()}
+}, async p=>{const media_files=await prepareProtectedChatAttachment(p.attachment_artifact_path);if(!String(p.body??"").trim()&&!media_files)throw new Error("Text and/or one attachment is required");return run("prepare",{input:{adapter:"reddit",account:p.account,action:"send_chat_message",target:{room_id:p.room_id},content:{body:p.body??"",media_files},owner_command:true}});});
+server.registerTool("reddit_direct_message_prepare", {
+  description:"Prepare text and/or one protected attachment to a verified Reddit username. Pass recipient_fullname (t2_...) when known. attachment_artifact_path must be a protected Publisher artifact. Preview creates no chat/media upload; publish reuses or creates the native direct request.",
+  inputSchema:{account,recipient_username:z.string().regex(/^[A-Za-z0-9_-]{1,20}$/),recipient_fullname:z.string().regex(/^t2_[a-z0-9]+$/i).optional(),body:z.string().max(40_000).optional(),attachment_artifact_path:z.string().optional()}
+}, async p=>{const media_files=await prepareProtectedChatAttachment(p.attachment_artifact_path);if(!String(p.body??"").trim()&&!media_files)throw new Error("Text and/or one attachment is required");return run("prepare",{input:{adapter:"reddit",account:p.account,action:"send_chat_message",target:{recipient_username:p.recipient_username,recipient_fullname:p.recipient_fullname},content:{body:p.body??"",media_files},owner_command:true}});});
 server.registerTool("diagnostics_run", { description:"Run local, optionally read-only live adapter diagnostics.", inputSchema:{live:z.boolean().default(false)} }, p=>run("diagnose",p));
-server.registerTool("artifact_get", {description:"Return a preview screenshot as base64 plus its SHA-256 hash.",inputSchema:{path:z.string()}},p=>run("artifact",p));
+server.registerTool("artifact_get", {description:"Return a protected Publisher artifact or downloaded Reddit Chat file as base64. Large files can be read in chunks with offset/max_bytes.",inputSchema:{path:z.string(),offset:z.number().int().min(0).default(0),max_bytes:z.number().int().min(1).max(8_000_000).default(8_000_000)}},p=>run("artifact",p));
 
 await server.connect(new StdioServerTransport());

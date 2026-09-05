@@ -33,6 +33,17 @@ function localImages(files?: string[]): Array<Record<string, unknown>> | undefin
   });
 }
 
+function localChatFile(requested?: string): Array<Record<string, unknown>> | undefined {
+  if (!requested) return undefined;
+  const source=fs.realpathSync(requested); const stat=fs.statSync(source);
+  if(!stat.isFile() || stat.size<1 || stat.size>20*1024*1024) throw new Error("Reddit Chat attachment must be a file between 1 byte and 20 MiB.");
+  const root=path.join(config.stateDir,"artifacts","local-files"); fs.mkdirSync(root,{recursive:true,mode:0o700});
+  const ext=path.extname(source).toLowerCase();
+  const mime:Record<string,string>={".png":"image/png",".jpg":"image/jpeg",".jpeg":"image/jpeg",".gif":"image/gif",".webp":"image/webp",".pdf":"application/pdf",".txt":"text/plain",".md":"text/markdown",".csv":"text/csv",".json":"application/json",".zip":"application/zip",".mp4":"video/mp4",".webm":"video/webm",".mp3":"audio/mpeg",".wav":"audio/wav",".ogg":"audio/ogg"};
+  const target=path.join(root,`${crypto.randomUUID()}${ext || ".bin"}`); fs.copyFileSync(source,target); fs.chmodSync(target,0o600); const body=fs.readFileSync(target);
+  return [{path:target,name:path.basename(source),mime_type:mime[ext]??"application/octet-stream",size:body.length,sha256:`sha256:${crypto.createHash("sha256").update(body).digest("hex")}`}];
+}
+
 const prep = program.command("prepare").description("Create one encrypted draft; never publishes");
 prep.command("reddit-post")
   .requiredOption("--subreddit <name>")
@@ -58,6 +69,23 @@ prep.command("reddit-reply")
   .option("--body-file <path>")
   .option("--account <id>", "account", "default")
   .action(o => call("prepare", { input:{adapter:"reddit",account:o.account,action:"create_comment",target:{url:o.target},content:{body:text(o.body,o.bodyFile)},owner_command:true} }));
+
+prep.command("reddit-chat-reply")
+  .requiredOption("--room <reddit-chat-room-id>")
+  .option("--body <text>")
+  .option("--body-file <path>")
+  .option("--file <path>", "attach one local file/media item")
+  .option("--account <id>", "account", "default")
+  .action(o => call("prepare", { input:{adapter:"reddit",account:o.account,action:"send_chat_message",target:{room_id:o.room},content:{body:text(o.body,o.bodyFile),media_files:localChatFile(o.file)},owner_command:true} }));
+
+prep.command("reddit-direct-message")
+  .requiredOption("--username <reddit-username>")
+  .option("--fullname <t2-id>", "verified Reddit t2_ account id")
+  .option("--body <text>")
+  .option("--body-file <path>")
+  .option("--file <path>", "attach one local file/media item")
+  .option("--account <id>", "account", "default")
+  .action(o => call("prepare", { input:{adapter:"reddit",account:o.account,action:"send_chat_message",target:{recipient_username:o.username,recipient_fullname:o.fullname},content:{body:text(o.body,o.bodyFile),media_files:localChatFile(o.file)},owner_command:true} }));
 
 program.command("edit")
   .requiredOption("--target <exact-reddit-permalink>")

@@ -32,6 +32,7 @@ publish
 - **Thread context**: read an exact Reddit post, nested comments, and a targeted comment from its permalink
 - **Your recent activity**: find your latest Reddit posts/comments without manually copying links
 - **Inbox & replies**: read unread or recent Reddit replies/messages before drafting a response
+- **Reddit Chat media/files**: read image/file/video/audio attachments, download the exact event, and send one protected attachment with optional text
 - **Posts**: text, link, and 1–4 image posts
 - **Comments & replies**: including replies in modern Shreddit threads
 - **Edit / delete**: exact canonical post or comment targets only
@@ -186,6 +187,11 @@ Useful Reddit-specific MCP tools include:
 - `reddit_thread_get`
 - `reddit_my_activity`
 - `reddit_inbox`
+- `reddit_chat_list`
+- `reddit_chat_get`
+- `reddit_chat_attachment_get`
+- `reddit_chat_reply_prepare`
+- `reddit_direct_message_prepare`
 - `reddit_post_prepare`
 - `reddit_comment_prepare`
 - `reddit_reply_prepare`

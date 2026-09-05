@@ -5,6 +5,7 @@ import { buildActionsOpenApi } from "../actions-schema.js";
 test("GPT Actions schema uses the deployed HTTPS origin and Bearer auth",()=>{
   const schema=buildActionsOpenApi("https://publisher.example.com/") as any;
   assert.equal(schema.openapi,"3.1.0");
+  assert.equal(schema.info.version,"1.2.0");
   assert.equal(schema.jsonSchemaDialect,"https://json-schema.org/draft/2020-12/schema");
   assert.equal(schema.servers[0].url,"https://publisher.example.com");
   assert.equal(schema.components.securitySchemes.bearerAuth.scheme,"bearer");
@@ -28,6 +29,7 @@ test("read and preview actions are non-consequential but real publish always req
   assert.equal(schema.paths["/v1/reddit/notifications"].get["x-openai-isConsequential"],false);
   assert.equal(schema.paths["/v1/reddit/chats"].get["x-openai-isConsequential"],false);
   assert.equal(schema.paths["/v1/reddit/chats/messages"].get["x-openai-isConsequential"],false);
+  assert.equal(schema.paths["/v1/reddit/chats/attachment"].get["x-openai-isConsequential"],false);
   assert.equal(schema.paths["/v1/reddit/chats/replies/preview"].post["x-openai-isConsequential"],false);
   assert.equal(schema.paths["/v1/reddit/chats/replies/publish"].post["x-openai-isConsequential"],true);
   assert.equal(schema.paths["/v1/reddit/chats/direct/preview"].post["x-openai-isConsequential"],false);
@@ -71,4 +73,18 @@ test("Reddit publish authorization persists across retry follow-ups",()=>{
   assert.match(legacyPublish,/latest user message is only a retry\/status acknowledgement/i);
   assert.equal(schema.components.schemas.PreviewResult.properties.next_step_if_already_authorized.enum[0],"publishPublication");
   assert.match(String(schema.components.schemas.PreviewResult.properties.authorization_policy.description),/persists across transient failures/i);
+});
+
+
+test("Reddit Chat schema exposes exact attachment download and one-file sends",()=>{
+  const schema=buildActionsOpenApi("https://publisher.example.com") as any;
+  const attachment=schema.paths["/v1/reddit/chats/attachment"].get;
+  assert.equal(attachment.operationId,"getRedditChatAttachment"); assert.equal(attachment["x-openai-isConsequential"],false);
+  assert.match(String(attachment.description),/openaiFileResponse/i); assert.equal(schema.components.schemas.ActionResult.properties.openaiFileResponse.items.format,"uri");
+  assert.deepEqual(attachment.parameters.filter((p:any)=>p.required).map((p:any)=>p.name),["room_id","event_id"]);
+  const reply=schema.paths["/v1/reddit/chats/replies/publish"].post.requestBody.content["application/json"].schema;
+  assert.deepEqual(reply.required,["room_id"]); assert.equal(reply.properties.openaiFileIdRefs.maxItems,1); assert.equal(reply.properties.body.type,"string");
+  const direct=schema.paths["/v1/reddit/chats/direct/publish"].post.requestBody.content["application/json"].schema;
+  assert.deepEqual(direct.required,["recipient_username"]); assert.equal(direct.properties.openaiFileIdRefs.maxItems,1);
+  assert.match(String(schema.paths["/v1/reddit/chats/messages"].get.description),/attachment metadata/i);
 });

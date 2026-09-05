@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
+import path from "node:path";
 import type { Adapter } from "./adapters/base.js";
 import { RedditBrowserAdapter } from "./adapters/reddit-browser.js";
 import type { Config } from "./config.js";
@@ -9,12 +10,13 @@ import { PublisherError } from "./errors.js";
 import { DraftState, PrepareInput, envelope, type Draft, type ResultEnvelope } from "./types.js";
 
 export function isFinalPublishFailure(message: string): boolean {
-  return /^(?:PUBLISH_RESULT_AMBIGUOUS|SITE_CHANGED|SENDER_CHAT_RESTRICTED|RECIPIENT_NOT_FOUND|RECIPIENT_IDENTITY_MISMATCH|RECIPIENT_SELF|RECIPIENT_CHAT_UNAVAILABLE):/.test(String(message));
+  return /^(?:PUBLISH_RESULT_AMBIGUOUS|SITE_CHANGED|SENDER_CHAT_RESTRICTED|SENDER_MEDIA_RESTRICTED|RECIPIENT_NOT_FOUND|RECIPIENT_IDENTITY_MISMATCH|RECIPIENT_SELF|RECIPIENT_CHAT_UNAVAILABLE):/.test(String(message));
 }
 
 export function redditChatMutationFingerprint(d: Draft, targetOverride?: string): string | undefined {
   if (d.adapter !== "reddit" || d.action !== "send_chat_message") return undefined;
   const body=String(d.content.body ?? "").trim();
+  const media=Array.isArray(d.content.media_files) ? d.content.media_files.map((raw:any)=>({sha256:String(raw?.sha256??""),name:String(raw?.name??""),mime_type:String(raw?.mime_type??""),size:Number(raw?.size??0)})) : [];
   const target=targetOverride ?? (d.target.room_id
     ? `room:${String(d.target.room_id)}`
     : d.target.recipient_username
@@ -22,8 +24,8 @@ export function redditChatMutationFingerprint(d: Draft, targetOverride?: string)
       : d.target.recipient_fullname
         ? `user:${String(d.target.recipient_fullname).toLowerCase()}`
         : "");
-  if (!body || !target) return undefined;
-  return crypto.createHash("sha256").update(JSON.stringify([d.adapter,d.account,d.action,target,body])).digest("hex");
+  if ((!body && !media.length) || !target) return undefined;
+  return crypto.createHash("sha256").update(JSON.stringify([d.adapter,d.account,d.action,target,body,media])).digest("hex");
 }
 
 export class PublisherService {
@@ -195,7 +197,14 @@ export class PublisherService {
     catch(e:any){ return this.fail(e); }
   }
 
-  async artifact(artifactPath:string):Promise<ResultEnvelope>{try{const root=`${this.config.stateDir}/artifacts/`;const resolved=fs.realpathSync(artifactPath);if(!resolved.startsWith(fs.realpathSync(root)))throw new Error("ARTIFACT_FORBIDDEN");const data=fs.readFileSync(resolved);if(data.length>8_000_000)throw new Error("ARTIFACT_TOO_LARGE");return envelope({result:{path:resolved,mime_type:"image/png",sha256:`sha256:${crypto.createHash("sha256").update(data).digest("hex")}`,base64:data.toString("base64")}});}catch(e:any){return this.fail(e);}}
+  async artifact(artifactPath:string,offset=0,maxBytes=8_000_000):Promise<ResultEnvelope>{try{
+    const root=fs.realpathSync(`${this.config.stateDir}/artifacts/`)+path.sep; const resolved=fs.realpathSync(artifactPath); if(!resolved.startsWith(root))throw new Error("ARTIFACT_FORBIDDEN");
+    const stat=fs.statSync(resolved); if(!stat.isFile())throw new Error("ARTIFACT_NOT_FILE");
+    const start=Math.max(0,Math.floor(Number(offset)||0)); const cap=Math.max(1,Math.min(8_000_000,Math.floor(Number(maxBytes)||8_000_000))); if(start>=stat.size && stat.size>0)throw new Error("ARTIFACT_OFFSET_INVALID");
+    const length=Math.min(cap,Math.max(0,stat.size-start)); const data=Buffer.alloc(length); const fd=fs.openSync(resolved,"r"); try{if(length)fs.readSync(fd,data,0,length,start);}finally{fs.closeSync(fd);}
+    const ext=path.extname(resolved).toLowerCase(); const mime=ext===".png"?"image/png":ext===".jpg"||ext===".jpeg"?"image/jpeg":ext===".gif"?"image/gif":ext===".webp"?"image/webp":ext===".pdf"?"application/pdf":ext===".mp4"?"video/mp4":ext===".webm"?"video/webm":ext===".mp3"?"audio/mpeg":ext===".wav"?"audio/wav":ext===".json"?"application/json":ext===".txt"||ext===".md"?"text/plain":"application/octet-stream";
+    const full=fs.readFileSync(resolved); const next=start+length; return envelope({result:{path:resolved,name:path.basename(resolved),mime_type:mime,size:stat.size,offset:start,next_offset:next<stat.size?next:undefined,eof:next>=stat.size,sha256:`sha256:${crypto.createHash("sha256").update(full).digest("hex")}`,base64:data.toString("base64")}});
+  }catch(e:any){return this.fail(e);}}
 
   private issueApproval(d: Draft, previewDigest: string, confirmation: string, allowAlreadyApproved = false): { token: string; expires_at: string } {
     if (d.state !== "PREVIEWED" && !(allowAlreadyApproved && d.state === "APPROVED")) throw new Error(`INVALID_STATE: expected PREVIEWED${allowAlreadyApproved ? "/APPROVED" : ""}, got ${d.state}`);

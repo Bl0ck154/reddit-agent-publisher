@@ -2,10 +2,11 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
+import path from "node:path";
 import { z } from "zod";
 import { buildActionsOpenApi } from "./actions-schema.js";
 import { loadConfig } from "./config.js";
-import { ActionFileError, prepareGptActionImages } from "./gpt-action-files.js";
+import { ActionFileError, prepareGptActionFiles, prepareGptActionImages } from "./gpt-action-files.js";
 import { rpc } from "./rpc.js";
 import type { ResultEnvelope } from "./types.js";
 
@@ -27,8 +28,10 @@ const RedditPost = z.object({ subreddit:z.string().min(2).max(21),title:z.string
   .refine(value=>!(value.url && value.openaiFileIdRefs?.length),{message:"A Reddit post cannot contain both a link URL and uploaded images."});
 const RedditComment = z.object({ url:z.string().url(),body:z.string().min(1).max(40_000),body_format:BodyFormat,account:Account.optional() }).strict();
 const RedditDelete = z.object({ url:z.string().url(),account:Account.optional() }).strict();
-const RedditChatMessage = z.object({ room_id:z.string().min(4).max(260),body:z.string().min(1).max(40_000),account:Account.optional() }).strict();
-const RedditDirectMessage = z.object({ recipient_username:z.string().min(1).max(20).regex(/^[A-Za-z0-9_-]+$/),recipient_fullname:z.string().regex(/^t2_[a-z0-9]+$/i).optional(),body:z.string().min(1).max(40_000),account:Account.optional() }).strict();
+const RedditChatMessage = z.object({ room_id:z.string().min(4).max(260),body:z.string().max(40_000).optional(),openaiFileIdRefs:z.array(GptFileRef).min(1).max(1).optional(),account:Account.optional() }).strict()
+  .refine(value=>Boolean(value.body?.trim()) || Boolean(value.openaiFileIdRefs?.length),{message:"A Reddit Chat message requires text and/or one attachment."});
+const RedditDirectMessage = z.object({ recipient_username:z.string().min(1).max(20).regex(/^[A-Za-z0-9_-]+$/),recipient_fullname:z.string().regex(/^t2_[a-z0-9]+$/i).optional(),body:z.string().max(40_000).optional(),openaiFileIdRefs:z.array(GptFileRef).min(1).max(1).optional(),account:Account.optional() }).strict()
+  .refine(value=>Boolean(value.body?.trim()) || Boolean(value.openaiFileIdRefs?.length),{message:"A Reddit direct message requires text and/or one attachment."});
 const PublishBody = z.object({ preview_digest:z.string().min(16).max(256) }).strict();
 const ThreadQuery = z.object({
   url:z.string().url(), account:Account,
@@ -47,6 +50,7 @@ const InboxQuery = z.object({
 });
 const ChatListQuery = z.object({ account:Account, unread_only:z.enum(["true","false"]).default("false").transform(value=>value==="true"), limit:z.coerce.number().int().min(1).max(100).default(25) });
 const ChatRoomQuery = z.object({ account:Account, room_id:z.string().min(4).max(260), limit:z.coerce.number().int().min(1).max(100).default(50) });
+const ChatAttachmentQuery = z.object({ account:Account,room_id:z.string().min(4).max(260),event_id:z.string().regex(/^\$\S{1,512}$/) });
 
 type PreviewKind = "reddit-post"|"reddit-comment"|"reddit-chat-message"|"reddit-edit"|"reddit-delete";
 
@@ -74,6 +78,42 @@ function json(res: ServerResponse, status: number, value: unknown, cache = false
 function text(res: ServerResponse, status: number, value: string, contentType = "text/plain; charset=utf-8"): void {
   res.writeHead(status, { "content-type": contentType, "content-length": Buffer.byteLength(value), "x-content-type-options":"nosniff" });
   res.end(value);
+}
+
+function cleanDownloadName(value: unknown): string {
+  const base=path.basename(String(value || "reddit-chat-file")).replace(/[\r\n"\\]+/g,"_").slice(0,140);
+  return base || "reddit-chat-file";
+}
+function cleanDownloadMime(value: unknown): string {
+  const mime=String(value || "application/octet-stream").trim().toLowerCase();
+  return /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(mime) ? mime : "application/octet-stream";
+}
+function signedArtifactDownload(req: IncomingMessage, artifactPath: string, name: string, mimeType: string): string {
+  const root=fs.realpathSync(path.join(config.stateDir,"artifacts"));
+  const resolved=fs.realpathSync(artifactPath);
+  const relative=path.relative(root,resolved);
+  if(!relative || relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("ARTIFACT_FORBIDDEN");
+  const payload={r:relative.split(path.sep).join("/"),n:cleanDownloadName(name),m:cleanDownloadMime(mimeType),e:Date.now()+5*60_000};
+  const token=Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const sig=crypto.createHmac("sha256",apiKey).update(token).digest("hex");
+  return `${publicBase(req)}/v1/files/download?token=${encodeURIComponent(token)}&sig=${sig}`;
+}
+function serveSignedArtifact(url: URL, res: ServerResponse): void {
+  try {
+    const token=url.searchParams.get("token") ?? ""; const sig=url.searchParams.get("sig") ?? "";
+    const expected=crypto.createHmac("sha256",apiKey).update(token).digest("hex");
+    if(!safeEqual(sig,expected)) { json(res,403,{ok:false,message:"Invalid or expired file link."}); return; }
+    const payload=JSON.parse(Buffer.from(token,"base64url").toString("utf8")) as {r?:string;n?:string;m?:string;e?:number};
+    if(!payload.r || !payload.e || payload.e<Date.now() || payload.e>Date.now()+10*60_000) { json(res,403,{ok:false,message:"Invalid or expired file link."}); return; }
+    const root=fs.realpathSync(path.join(config.stateDir,"artifacts")); const candidate=fs.realpathSync(path.join(root,payload.r)); const relative=path.relative(root,candidate);
+    if(!relative || relative.startsWith("..") || path.isAbsolute(relative) || !fs.statSync(candidate).isFile()) { json(res,403,{ok:false,message:"File link is not valid."}); return; }
+    const name=cleanDownloadName(payload.n); const mime=cleanDownloadMime(payload.m); const stat=fs.statSync(candidate);
+    res.writeHead(200,{"content-type":mime,"content-length":stat.size,"content-disposition":`attachment; filename="${name}"; filename*=UTF-8''${encodeURIComponent(name)}`,"cache-control":"private, no-store","x-content-type-options":"nosniff"});
+    fs.createReadStream(candidate).pipe(res);
+  } catch { json(res,404,{ok:false,message:"File is no longer available."}); }
+}
+function actionCanReturnFile(mimeType:string,size:number): boolean {
+  return size<=10*1024*1024 && !/^image\//i.test(mimeType) && !/^video\//i.test(mimeType);
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -192,6 +232,8 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     text(res,200,`<!doctype html><html><head><meta charset="utf-8"><title>Reddit Agent Publisher Privacy Policy</title></head><body><main><h1>Reddit Agent Publisher Privacy Policy</h1><p>This privately operated service accepts content only to perform publishing actions requested by its authenticated owner. Draft content is stored encrypted by the publisher, browser sessions remain on the owner-controlled server, and the service does not sell personal data.</p><p>Authentication secrets are not returned through GPT Actions. Reddit account passwords, 2FA codes, and CAPTCHA answers are entered only in the owner's browser session.</p><p>Operational metadata may be retained for security and audit purposes. The owner can remove stored drafts, artifacts, browser profiles, and the service itself from the server.</p></main></body></html>`,"text/html; charset=utf-8"); return;
   }
 
+  if (req.method === "GET" && url.pathname === "/v1/files/download") { serveSignedArtifact(url,res); return; }
+
   if (!url.pathname.startsWith("/v1/")) { json(res,404,{ok:false,message:"Not found."}); return; }
   if (!authorized(req)) { res.setHeader("www-authenticate","Bearer"); json(res,401,{ok:false,message:"Unauthorized."}); return; }
   if (!allowRate(req)) { json(res,429,{ok:false,message:"Too many requests. Try again shortly."}); return; }
@@ -232,6 +274,14 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (req.method === "GET" && url.pathname === "/v1/reddit/chats/messages") {
     const q = ChatRoomQuery.parse(Object.fromEntries(url.searchParams)); const env = await local("reddit_chat_get", q); json(res,200,readOutput(env,"Reddit Chat messages loaded.")); return;
   }
+  if (req.method === "GET" && url.pathname === "/v1/reddit/chats/attachment") {
+    const q=ChatAttachmentQuery.parse(Object.fromEntries(url.searchParams)); const env=await local("reddit_chat_attachment_get",q);
+    if(!env.ok){json(res,200,readOutput(env,"Reddit Chat attachment could not be loaded."));return;}
+    const meta=(env.result ?? {}) as any; const downloadUrl=signedArtifactDownload(req,String(meta.artifact_path),String(meta.name),String(meta.mime_type));
+    const response:any={ok:true,message:"Reddit Chat attachment downloaded and made available through a short-lived signed link.",data:{room_id:q.room_id,event_id:q.event_id,name:meta.name,mime_type:meta.mime_type,size:meta.size,sha256:meta.sha256,kind:meta.kind,download_url:downloadUrl,expires_in_seconds:300}};
+    if(actionCanReturnFile(String(meta.mime_type),Number(meta.size))) response.openaiFileResponse=[downloadUrl];
+    json(res,200,response);return;
+  }
 
   if (req.method === "POST") {
     const raw = await readJson(req);
@@ -244,10 +294,10 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       const b=RedditComment.parse(raw); json(res,200,await prepareAndPublish({adapter:"reddit",account:b.account??"default",action:"create_comment",target:{url:b.url},content:{body:b.body,body_format:b.body_format}})); return;
     }
     if (url.pathname === "/v1/reddit/chats/replies/publish") {
-      const b=RedditChatMessage.parse(raw); json(res,200,await prepareAndPublish({adapter:"reddit",account:b.account??"default",action:"send_chat_message",target:{room_id:b.room_id},content:{body:b.body}})); return;
+      const b=RedditChatMessage.parse(raw); const media_files=b.openaiFileIdRefs?.length?await prepareGptActionFiles(b.openaiFileIdRefs,config.stateDir,1):undefined; json(res,200,await prepareAndPublish({adapter:"reddit",account:b.account??"default",action:"send_chat_message",target:{room_id:b.room_id},content:{body:b.body??"",media_files}})); return;
     }
     if (url.pathname === "/v1/reddit/chats/direct/publish") {
-      const b=RedditDirectMessage.parse(raw); json(res,200,await prepareAndPublish({adapter:"reddit",account:b.account??"default",action:"send_chat_message",target:{recipient_username:b.recipient_username,recipient_fullname:b.recipient_fullname},content:{body:b.body}})); return;
+      const b=RedditDirectMessage.parse(raw); const media_files=b.openaiFileIdRefs?.length?await prepareGptActionFiles(b.openaiFileIdRefs,config.stateDir,1):undefined; json(res,200,await prepareAndPublish({adapter:"reddit",account:b.account??"default",action:"send_chat_message",target:{recipient_username:b.recipient_username,recipient_fullname:b.recipient_fullname},content:{body:b.body??"",media_files}})); return;
     }
     if (url.pathname === "/v1/reddit/edits/publish") {
       const b=RedditComment.parse(raw); json(res,200,await prepareAndPublish({adapter:"reddit",account:b.account??"default",action:"edit",target:{url:b.url},content:{body:b.body,body_format:b.body_format}})); return;
@@ -261,10 +311,10 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       const b=RedditComment.parse(raw); json(res,200,await preparePreview({adapter:"reddit",account:b.account??"default",action:"create_comment",target:{url:b.url},content:{body:b.body,body_format:b.body_format}},"reddit-comment")); return;
     }
     if (url.pathname === "/v1/reddit/chats/replies/preview") {
-      const b=RedditChatMessage.parse(raw); json(res,200,await preparePreview({adapter:"reddit",account:b.account??"default",action:"send_chat_message",target:{room_id:b.room_id},content:{body:b.body}},"reddit-chat-message")); return;
+      const b=RedditChatMessage.parse(raw); const media_files=b.openaiFileIdRefs?.length?await prepareGptActionFiles(b.openaiFileIdRefs,config.stateDir,1):undefined; json(res,200,await preparePreview({adapter:"reddit",account:b.account??"default",action:"send_chat_message",target:{room_id:b.room_id},content:{body:b.body??"",media_files}},"reddit-chat-message")); return;
     }
     if (url.pathname === "/v1/reddit/chats/direct/preview") {
-      const b=RedditDirectMessage.parse(raw); json(res,200,await preparePreview({adapter:"reddit",account:b.account??"default",action:"send_chat_message",target:{recipient_username:b.recipient_username,recipient_fullname:b.recipient_fullname},content:{body:b.body}},"reddit-chat-message")); return;
+      const b=RedditDirectMessage.parse(raw); const media_files=b.openaiFileIdRefs?.length?await prepareGptActionFiles(b.openaiFileIdRefs,config.stateDir,1):undefined; json(res,200,await preparePreview({adapter:"reddit",account:b.account??"default",action:"send_chat_message",target:{recipient_username:b.recipient_username,recipient_fullname:b.recipient_fullname},content:{body:b.body??"",media_files}},"reddit-chat-message")); return;
     }
     if (url.pathname === "/v1/reddit/edits/preview") {
       const b=RedditComment.parse(raw); json(res,200,await preparePreview({adapter:"reddit",account:b.account??"default",action:"edit",target:{url:b.url},content:{body:b.body,body_format:b.body_format}},"reddit-edit")); return;

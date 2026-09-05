@@ -17,6 +17,15 @@ export interface GptActionFileRef {
   download_link?: string;
 }
 
+
+export interface PreparedActionFile {
+  path: string;
+  name: string;
+  mime_type: string;
+  size: number;
+  sha256: string;
+}
+
 export interface PreparedActionImage {
   path: string;
   name: string;
@@ -78,7 +87,7 @@ function safeName(value: unknown, index: number, extension: string): string {
   return base || `chatgpt-image-${index + 1}.${extension}`;
 }
 
-async function requestImage(urlValue: string, redirects = 0): Promise<Buffer> {
+async function requestFile(urlValue: string, redirects = 0, accept = "*/*"): Promise<Buffer> {
   const url = validateGptActionFileUrl(urlValue);
   const addresses = await dns.lookup(url.hostname, { all:true, verbatim:true });
   const selected = addresses.find(entry => isPublicAddress(entry.address));
@@ -91,7 +100,7 @@ async function requestImage(urlValue: string, redirects = 0): Promise<Buffer> {
     const fail = (error: Error) => { if (!settled) { settled = true; reject(error); } };
     const req = https.request(url, {
       method:"GET",
-      headers:{ accept:"image/png,image/jpeg,image/gif,image/webp" },
+      headers:{ accept },
       servername:url.hostname,
       lookup:((_hostname: string, _options: unknown, callback: (error: NodeJS.ErrnoException | null, address: string, family: number) => void) => callback(null,selected.address,selected.family)) as any,
     }, response => {
@@ -100,7 +109,7 @@ async function requestImage(urlValue: string, redirects = 0): Promise<Buffer> {
         response.resume();
         const location = response.headers.location;
         if (!location || redirects >= MAX_REDIRECTS) { fail(new ActionFileError("GPT_FILE_REDIRECT_BLOCKED", "The ChatGPT image redirect chain is invalid.", 502)); return; }
-        void requestImage(new URL(location,url).toString(),redirects + 1).then(resolve,fail);
+        void requestFile(new URL(location,url).toString(),redirects + 1,accept).then(resolve,fail);
         return;
       }
       if (status < 200 || status >= 300) { response.resume(); fail(new ActionFileError("GPT_FILE_DOWNLOAD_FAILED", `ChatGPT image download returned HTTP ${status}.`, 502)); return; }
@@ -121,6 +130,10 @@ async function requestImage(urlValue: string, redirects = 0): Promise<Buffer> {
   });
 }
 
+async function requestImage(urlValue: string, redirects = 0): Promise<Buffer> {
+  return requestFile(urlValue,redirects,"image/png,image/jpeg,image/gif,image/webp");
+}
+
 export async function prepareGptActionImages(refs: Array<string | GptActionFileRef>, stateDir: string): Promise<PreparedActionImage[]> {
   if (!refs.length || refs.length > MAX_FILES) throw new ActionFileError("GPT_FILE_COUNT_INVALID", "Attach between one and four images.");
   const outputDir = path.join(stateDir,"artifacts","gpt-files");
@@ -136,6 +149,40 @@ export async function prepareGptActionImages(refs: Array<string | GptActionFileR
       const filePath = path.join(outputDir,`${crypto.randomUUID()}.${detected.extension}`);
       fs.writeFileSync(filePath,buffer,{mode:0o600,flag:"wx"});
       prepared.push({ path:filePath,name:safeName(ref.name,index,detected.extension),mime_type:detected.mime_type,size:buffer.length,sha256:`sha256:${crypto.createHash("sha256").update(buffer).digest("hex")}` });
+    }
+    return prepared;
+  } catch (error) {
+    for (const item of prepared) fs.rmSync(item.path,{force:true});
+    throw error;
+  }
+}
+
+
+function safeMime(value: unknown): string {
+  const mime=String(value ?? "").trim().toLowerCase();
+  return /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/.test(mime) ? mime : "application/octet-stream";
+}
+
+function safeGenericName(value: unknown, index: number): string {
+  const base=path.basename(String(value || `chatgpt-file-${index+1}.bin`)).replace(/[^A-Za-z0-9._ -]+/g,"_").slice(0,120);
+  return base || `chatgpt-file-${index+1}.bin`;
+}
+
+export async function prepareGptActionFiles(refs: Array<string | GptActionFileRef>, stateDir: string, maxFiles = 1): Promise<PreparedActionFile[]> {
+  if (!refs.length || refs.length > maxFiles) throw new ActionFileError("GPT_FILE_COUNT_INVALID", `Attach between one and ${maxFiles} file${maxFiles===1?"":"s"}.`);
+  const outputDir=path.join(stateDir,"artifacts","gpt-files");
+  fs.mkdirSync(outputDir,{recursive:true,mode:0o700}); fs.chmodSync(outputDir,0o700);
+  const prepared:PreparedActionFile[]=[];
+  try {
+    for (const [index,ref] of refs.entries()) {
+      if (!ref || typeof ref !== "object" || Array.isArray(ref) || !ref.download_link) throw new ActionFileError("GPT_FILE_REFERENCE_UNRESOLVED","ChatGPT did not provide a downloadable conversation-file reference. Attach the file directly to this GPT chat and retry.");
+      const buffer=await requestFile(String(ref.download_link));
+      if (buffer.length<1 || buffer.length>MAX_FILE_BYTES) throw new ActionFileError("GPT_FILE_TOO_LARGE","The attached file exceeds 20 MiB.",413);
+      const name=safeGenericName(ref.name,index);
+      const ext=(path.extname(name).replace(/[^A-Za-z0-9.]/g,"").slice(0,12) || ".bin");
+      const filePath=path.join(outputDir,`${crypto.randomUUID()}${ext}`);
+      fs.writeFileSync(filePath,buffer,{mode:0o600,flag:"wx"});
+      prepared.push({path:filePath,name,mime_type:safeMime(ref.mime_type),size:buffer.length,sha256:`sha256:${crypto.createHash("sha256").update(buffer).digest("hex")}`});
     }
     return prepared;
   } catch (error) {

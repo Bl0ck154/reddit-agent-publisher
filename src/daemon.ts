@@ -40,8 +40,9 @@ async function dispatch(method: string, p: any) {
     case "reddit_notifications": return redditRead(() => redditReader.notifications(p.account ?? "default", p.unread_only ?? true, p.limit ?? 25));
     case "reddit_chat_list": return redditRead(() => redditChat.conversations(p.account ?? "default", p.unread_only ?? false, p.limit ?? 25));
     case "reddit_chat_get": return redditRead(() => redditChat.room(p.account ?? "default", p.room_id, p.limit ?? 50));
+    case "reddit_chat_attachment_get": return redditRead(() => redditChat.attachment(p.account ?? "default", p.room_id, p.event_id));
     case "diagnose": return service.diagnose(Boolean(p.live));
-    case "artifact": return service.artifact(p.path);
+    case "artifact": return service.artifact(p.path,p.offset ?? 0,p.max_bytes ?? 8_000_000);
     default: throw new Error(`Unknown RPC method: ${method}`);
   }
 }
