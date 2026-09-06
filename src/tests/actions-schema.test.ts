@@ -5,7 +5,7 @@ import { buildActionsOpenApi } from "../actions-schema.js";
 test("GPT Actions schema uses the deployed HTTPS origin and Bearer auth",()=>{
   const schema=buildActionsOpenApi("https://publisher.example.com/") as any;
   assert.equal(schema.openapi,"3.1.0");
-  assert.equal(schema.info.version,"1.2.0");
+  assert.equal(schema.info.version,"1.2.1");
   assert.equal(schema.jsonSchemaDialect,"https://json-schema.org/draft/2020-12/schema");
   assert.equal(schema.servers[0].url,"https://publisher.example.com");
   assert.equal(schema.components.securitySchemes.bearerAuth.scheme,"bearer");
@@ -29,6 +29,8 @@ test("read and preview actions are non-consequential but real publish always req
   assert.equal(schema.paths["/v1/reddit/notifications"].get["x-openai-isConsequential"],false);
   assert.equal(schema.paths["/v1/reddit/chats"].get["x-openai-isConsequential"],false);
   assert.equal(schema.paths["/v1/reddit/chats/messages"].get["x-openai-isConsequential"],false);
+  assert.equal(schema.paths["/v1/publications/{draft_id}/status"].get["x-openai-isConsequential"],false);
+  assert.equal(schema.paths["/v1/publications/{draft_id}/status"].get.operationId,"getPublicationStatus");
   assert.equal(schema.paths["/v1/reddit/chats/attachment"].get["x-openai-isConsequential"],false);
   assert.equal(schema.paths["/v1/reddit/chats/replies/preview"].post["x-openai-isConsequential"],false);
   assert.equal(schema.paths["/v1/reddit/chats/replies/publish"].post["x-openai-isConsequential"],true);
@@ -87,4 +89,15 @@ test("Reddit Chat schema exposes exact attachment download and one-file sends",(
   const direct=schema.paths["/v1/reddit/chats/direct/publish"].post.requestBody.content["application/json"].schema;
   assert.deepEqual(direct.required,["recipient_username"]); assert.equal(direct.properties.openaiFileIdRefs.maxItems,1);
   assert.match(String(schema.paths["/v1/reddit/chats/messages"].get.description),/attachment metadata/i);
+});
+
+
+test("publish results and status lookup make successful writes unambiguous",()=>{
+  const schema=buildActionsOpenApi("https://publisher.example.com") as any;
+  assert.equal(schema.info.version,"1.2.1");
+  const props=schema.components.schemas.PublishResult.properties;
+  assert.equal(props.published.type,"boolean");
+  assert.deepEqual(props.status.enum,["PUBLISHED"]);
+  assert.equal(props.side_effect_performed.type,"boolean");
+  assert.match(String(schema.paths["/v1/publications/{draft_id}/status"].get.description),/never blindly retry/i);
 });

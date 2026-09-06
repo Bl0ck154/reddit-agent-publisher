@@ -17,7 +17,7 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
     jsonSchemaDialect: "https://json-schema.org/draft/2020-12/schema",
     info: {
       title: "Reddit Agent Publisher Actions",
-      version: "1.2.0",
+      version: "1.2.1",
       description: "Owner-only GPT Actions gateway for Reddit Agent Publisher. Reddit context operations are read-only. Preview operations never submit content. Finalized Reddit posts/comments can use one-step consequential publish actions; legacy publishPublication publishes an existing exact preview.",
     },
     servers: [{ url: server }],
@@ -238,6 +238,16 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
           responses: { "200": previewResponse },
         },
       },
+      "/v1/publications/{draft_id}/status": {
+        get: {
+          operationId: "getPublicationStatus",
+          "x-openai-isConsequential": false,
+          summary: "Verify whether a previewed/published write actually completed",
+          description: "Read-only. Use this after any client-side/network/technical error that occurred during or immediately after a consequential publish. Never assume the write failed and never blindly retry first. If data.published=true or data.status=PUBLISHED, report success and do not create another write. FAILED_FINAL means stop; FAILED_RETRYABLE means a fresh retry may be appropriate if prior authorization is still valid.",
+          parameters: [{ name:"draft_id",in:"path",required:true,schema:{type:"string",format:"uuid"} }],
+          responses: { "200": okResponse },
+        },
+      },
       "/v1/publications/{draft_id}/publish": {
         post: {
           operationId: "publishPublication",
@@ -272,7 +282,7 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
         PublishResult: {
           type: "object", required: ["ok", "message"],
           properties: {
-            ok: { type: "boolean" }, message: { type: "string" }, published_url: { type: "string" }, already_published: { type: "boolean" },
+            ok: { type: "boolean" }, message: { type: "string" }, published: { type:"boolean",description:"True is definitive confirmation that the external write completed." }, status: { type:"string",enum:["PUBLISHED"] }, draft_id: { type:"string",format:"uuid" }, side_effect_performed: { type:"boolean" }, published_url: { type: "string" }, already_published: { type: "boolean" },
             warnings: { type: "array", items: { type: "string" } }, error_code: { type: "string" },
           },
         },

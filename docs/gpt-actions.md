@@ -109,6 +109,10 @@ Typical flow:
 
 `previewRedditPost` accepts 1–4 ChatGPT conversation images through `openaiFileIdRefs`. Files are downloaded immediately into the protected local artifacts directory, validated by payload signature, and used only for the matching preview.
 
+### Ambiguous publish outcomes
+
+A network/tool-layer error does not prove that a consequential Reddit write failed. Successful publish responses include `published: true`, `status: "PUBLISHED"`, and the exact `draft_id`. If the Actions client reports a technical error during or immediately after publish, call the read-only `getPublicationStatus` for that draft before retrying. A returned `published: true` / `PUBLISHED` is definitive success and must not be retried; this prevents duplicate posts/comments when the client loses a successful response.
+
 ### Reddit Chat media and files
 
 `getRedditChatMessages` exposes Matrix-backed Reddit Chat attachments as structured metadata for `m.image`, `m.file`, `m.video`, and `m.audio`, including the exact message `event_id`, filename, MIME type, declared size, dimensions/duration when present, and the Reddit MXC reference. Arbitrary MXC URLs are never accepted as download targets. `getRedditChatAttachment` requires the exact `room_id` + `event_id` returned by the read tools, downloads only `mxc://reddit.com/...`, caps downloads at 20 MiB, and stores them in the protected Publisher artifacts tree. Reading/downloading a pending message request does not join or accept it.

@@ -69,6 +69,8 @@ Good examples:
 - "Підготував відповідь у цьому треді: … Відправляти?"
 - "Готово - опубліковано. Ось посилання: …"
 
+**Never report a publish as failed when the Action returned `ok:true`, `published:true`, or `status:"PUBLISHED"`. Those fields are definitive success, even if a URL is missing. If the Actions client itself reports a technical/network/tool error during or immediately after a consequential publish and a `draft_id` is known, do not retry the write and do not tell the owner it failed yet. First call `getPublicationStatus` for that exact draft. If it reports `published:true` / `PUBLISHED`, report success and do not create a duplicate. Only treat the write as failed after the read-only status check proves a non-published state.
+
 If the publisher reports `AUTH_REQUIRED` or `TAKEOVER_REQUIRED`, explain that manual login/verification is needed in the owner-controlled browser. Never ask for passwords, 2FA codes, CAPTCHA answers, API keys, or server credentials in chat.
 
 If it reports `SITE_CHANGED`, explain that Reddit's UI or response changed and the adapter stopped safely instead of guessing. Do not repeatedly retry the same broken action.

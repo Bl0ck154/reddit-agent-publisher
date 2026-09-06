@@ -189,6 +189,17 @@ export class PublisherService {
 
   async pending(): Promise<ResultEnvelope> { return envelope({ result: this.store.pending().map(d => ({ ...d, target: "[encrypted]", content: "[encrypted]" })) }); }
 
+  async publicationStatus(id: string): Promise<ResultEnvelope> {
+    try {
+      const d=this.needDraft(id);
+      const publication=this.store.db.prepare("SELECT external_id, canonical_url, created_at FROM publications WHERE draft_id=? ORDER BY created_at DESC LIMIT 1").get(id) as any;
+      const published=d.state === "PUBLISHED";
+      return envelope({ state:d.state,adapter:d.adapter,account:d.account,draft_id:id,revision:d.revision,side_effect:{performed:false},result:{
+        draft_id:id,state:d.state,status:d.state,published,action:d.action,external_id:publication?.external_id ?? undefined,published_url:publication?.canonical_url ?? undefined,published_at:publication?.created_at ?? undefined,
+      }});
+    } catch(e:any) { return this.fail(e,id); }
+  }
+
   async rules(account: string, subreddit: string): Promise<ResultEnvelope> { try { return envelope({ adapter: "reddit", result: await (this.adapter("reddit") as RedditBrowserAdapter).rules(this.effectiveAccount("reddit",account), subreddit) }); } catch(e:any){return this.fail(e);} }
   async flairs(account: string, subreddit: string): Promise<ResultEnvelope> { try { return envelope({ adapter: "reddit", result: await (this.adapter("reddit") as RedditBrowserAdapter).flairs(this.effectiveAccount("reddit",account), subreddit) }); } catch(e:any){return this.fail(e);} }
   async diagnose(live = false): Promise<ResultEnvelope> {

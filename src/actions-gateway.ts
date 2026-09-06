@@ -193,7 +193,8 @@ function publishOutput(env: ResultEnvelope): Record<string, unknown> {
   if (!env.ok) return { ok:false, message:errorMessage(env), error_code:env.error?.code, details:env.error?.details };
   const result = (env.result ?? {}) as any; const label = actionLabel(env.adapter, result.action);
   const already = Boolean(result.already_published);
-  return { ok:true, message:already ? `${label} was already published; no duplicate was created.` : `Done — the ${label.toLowerCase()} was published successfully.`,
+  return { ok:true, published:true, status:"PUBLISHED", draft_id:env.draft_id, side_effect_performed:Boolean(env.side_effect?.performed),
+    message:already ? `${label} was already published; no duplicate was created.` : `Done — the ${label.toLowerCase()} was published successfully.`,
     published_url:result.url, already_published:already, warnings:env.warnings ?? [] };
 }
 
@@ -237,6 +238,12 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (!url.pathname.startsWith("/v1/")) { json(res,404,{ok:false,message:"Not found."}); return; }
   if (!authorized(req)) { res.setHeader("www-authenticate","Bearer"); json(res,401,{ok:false,message:"Unauthorized."}); return; }
   if (!allowRate(req)) { json(res,429,{ok:false,message:"Too many requests. Try again shortly."}); return; }
+
+  const publicationStatusMatch = req.method === "GET" ? url.pathname.match(/^\/v1\/publications\/([0-9a-f-]{36})\/status$/i) : null;
+  if (publicationStatusMatch) {
+    const env=await local("publication_status",{draft_id:publicationStatusMatch[1]});
+    json(res,200,readOutput(env,"Publication status checked. Treat data.published=true or data.status=PUBLISHED as definitive success; do not retry that write.")); return;
+  }
 
   if (req.method === "GET" && url.pathname === "/v1/status") {
     const adapter = url.searchParams.get("adapter") ?? undefined; const account = url.searchParams.get("account") ?? "default";

@@ -32,6 +32,7 @@ async function dispatch(method: string, p: any) {
     case "login": return service.login(p.adapter, p.account ?? "default", p.extra ?? {});
     case "status": return service.status(p.adapter, p.account ?? "default");
     case "pending": return service.pending();
+    case "publication_status": return service.publicationStatus(p.draft_id);
     case "reddit_rules": return service.rules(p.account ?? "default", p.subreddit);
     case "reddit_flairs": return service.flairs(p.account ?? "default", p.subreddit);
     case "reddit_thread": return redditRead(() => redditReader.thread(p.account ?? "default", p.url, p.limit ?? 50, p.depth ?? 6, p.context ?? 8, p.sort ?? "best"));

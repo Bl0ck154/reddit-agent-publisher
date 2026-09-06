@@ -92,3 +92,15 @@ test("artifact_get reads protected files in chunks without changing the full dig
   const outside=path.join(stateDir,"outside.txt"); fs.writeFileSync(outside,"nope"); const denied=await service.artifact(outside,0,4); assert.equal(denied.ok,false); assert.equal(denied.error?.code,"ARTIFACT_FORBIDDEN");
   service.store.db.close(); fs.rmSync(stateDir,{recursive:true,force:true});
 });
+
+
+test("publication status definitively reports a completed confirmed write",async()=>{
+  const {service,fake,stateDir}=setup();
+  const prepared=await service.prepare({adapter:"reddit",account:"test",action:"create_comment",target:{url:"https://www.reddit.com/r/example/comments/abc123/title/"},content:{body:"status proof"},owner_command:true},"gpt-action");
+  const preview=await service.preview(prepared.draft_id!,"gpt-action");
+  const published=await service.publishConfirmedAction(prepared.draft_id!,(preview.preview as any).digest,"gpt-action");
+  assert.equal(published.ok,true); assert.equal(fake.publishes,1);
+  const status=await service.publicationStatus(prepared.draft_id!);
+  assert.equal(status.ok,true); assert.equal(status.side_effect.performed,false); assert.equal((status.result as any).published,true); assert.equal((status.result as any).status,"PUBLISHED"); assert.equal((status.result as any).draft_id,prepared.draft_id);
+  service.store.db.close(); fs.rmSync(stateDir,{recursive:true,force:true});
+});
