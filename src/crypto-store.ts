@@ -1,11 +1,18 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+function defaultKeyPath(): string {
+  const stateDir = process.env.PUBLISHER_STATE_DIR ?? path.join(os.homedir(), ".local", "share", "reddit-agent-publisher");
+  return path.join(stateDir, "master.key");
+}
 
 function key(): Buffer {
-  const p = process.env.PUBLISHER_MASTER_KEY_FILE;
-  if (!p || !fs.existsSync(p)) {
+  const p = process.env.PUBLISHER_MASTER_KEY_FILE ?? defaultKeyPath();
+  if (!fs.existsSync(p)) {
     if (process.env.NODE_ENV === "test") return crypto.createHash("sha256").update("test-only-key").digest();
-    throw new Error("PUBLISHER_MASTER_KEY_FILE is required");
+    throw new Error(`Publisher master key is missing at ${p}. Run 'reddit-agent-publisher setup' or set PUBLISHER_MASTER_KEY_FILE.`);
   }
   const raw = fs.readFileSync(p);
   return raw.length === 32 ? raw : crypto.createHash("sha256").update(raw).digest();
