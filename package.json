@@ -27,7 +27,8 @@
     "check": "npm run build && npm test",
     "start": "node dist/daemon.js",
     "start:actions": "node dist/actions-gateway.js",
-    "prepack": "npm run check"
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run check"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.4",
