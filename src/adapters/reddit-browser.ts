@@ -8,6 +8,8 @@ import type { Draft } from "../types.js";
 import type { Adapter, PreviewData, PublishData } from "./base.js";
 import { PublisherError } from "../errors.js";
 import { detectRedditUsername } from "../reddit-identity.js";
+import { fetchRedditBellNotifications, mergeRedditNotificationItems, normalizeInboxPayload } from "../reddit-read.js";
+import { classifyRedditNotification, evaluateRedditEligibility, extractRedditEligibilityRequirements, normalizeRedditSelfProfile, summarizeUnreadRedditNotifications, type RedditEligibilityRequirement, type RedditEligibilityScope } from "../reddit-preflight.js";
 
 type Role = "button" | "menuitem" | "link" | "combobox" | "tab";
 type MediaFile = { path: string; name: string; mime_type: string; size: number; sha256: string };
@@ -20,6 +22,7 @@ type PreviewSession = {
 };
 type CacheEntry = { value: Record<string, unknown>; storedAt: number; expiresAt: number };
 type LeanState = { enabled: boolean };
+type RedditPreflightAction = "post" | "comment" | "other";
 
 export function extractCommunityRulesText(raw: string): string | undefined {
   const text = raw.replace(/\r/g, "").trim();
@@ -319,6 +322,131 @@ export class RedditBrowserAdapter implements Adapter {
     }
   }
 
+  async preflight(account: string, subreddit: string, action: "post"|"comment" = "post", context: {post_title?:string;target_url?:string} = {}): Promise<Record<string, unknown>> {
+    const sub=this.subreddit(subreddit);
+    let targetPostId:string|undefined;
+    if(context.target_url){
+      const target=this.permalink(String(context.target_url));
+      if(target.subreddit.toLowerCase()!==sub.toLowerCase()) throw new PublisherError("REDDIT_PREFLIGHT_TARGET_MISMATCH",`The preflight target URL belongs to r/${target.subreddit}, not r/${sub}.`);
+      targetPostId=target.postId;
+    }
+    const page=await this.page(account,true);
+    try {
+      return await this.preflightOnPage(page,sub,action,{postTitle:context.post_title,targetPostId});
+    } finally {
+      this.chrome.release(account);
+    }
+  }
+
+  private async preflightOnPage(page: Page, subreddit: string, action: RedditPreflightAction, context: {postTitle?:string;targetPostId?:string} = {}): Promise<Record<string, unknown>> {
+    const sub=this.subreddit(subreddit);
+    if(!this.isRedditPage(page.url())) {
+      await this.gotoRetry(page,"https://www.reddit.com/");
+      this.assertOrigin(page.url());
+    }
+    await this.requireAuth(page);
+    const username=await this.detectUsername(page).catch(()=>undefined);
+    const endpoints:Record<string,string>={
+      inbox:"/message/inbox.json?raw_json=1&limit=100",
+      rules:`/r/${encodeURIComponent(sub)}/about/rules.json?raw_json=1`,
+      about:`/r/${encodeURIComponent(sub)}/about.json?raw_json=1`,
+    };
+    if(username) endpoints.profile=`/user/${encodeURIComponent(username)}/about.json?raw_json=1`;
+    if(context.targetPostId) endpoints.target=`/r/${encodeURIComponent(sub)}/comments/${encodeURIComponent(context.targetPostId)}.json?raw_json=1&limit=1&depth=0`;
+    let responses:Record<string,{status:number;text:string;url:string}>={};
+    try {
+      responses=await page.evaluate(async (paths) => {
+        const entries=await Promise.all(Object.entries(paths).map(async([key,path])=>{
+          try {
+            const response=await fetch(path,{credentials:"include",headers:{Accept:"application/json"}});
+            return [key,{status:response.status,url:response.url,text:(await response.text()).slice(0,200_000)}] as const;
+          } catch(error:any) {
+            return [key,{status:0,url:path,text:String(error?.message ?? error).slice(0,500)}] as const;
+          }
+        }));
+        return Object.fromEntries(entries);
+      },endpoints);
+    } catch(error:any) {
+      return {backend:"browser",subreddit:sub,action,profile:{username},eligibility:{status:"unknown",blocked:false,blockers:[],checks:[],detected_requirements:0},notifications:{unread_count:0,important_count:0,items:[]},warnings:[`Reddit eligibility/notification preflight could not be completed: ${String(error?.message ?? error).slice(0,180)}`],fetched_at:new Date().toISOString()};
+    }
+    const parse=(key:string):unknown=>{
+      const response=responses[key];
+      if(!response || response.status<200 || response.status>=300) return undefined;
+      try{return JSON.parse(response.text);}catch{return undefined;}
+    };
+    const profilePayload=parse("profile");
+    const profile=normalizeRedditSelfProfile(profilePayload);
+    if(!profile.username && username) profile.username=username;
+    const inboxItems=normalizeInboxPayload(parse("inbox")).map(item=>classifyRedditNotification(item));
+    const bell=await fetchRedditBellNotifications(page,20).catch(()=>({available:false,status:0,items:[],count:0} as Record<string,unknown>));
+    const bellItems=Array.isArray((bell as any).items)?(bell as any).items as Record<string,unknown>[]:[];
+    const notificationItems=mergeRedditNotificationItems(bellItems,inboxItems,100);
+    const notificationDigest=summarizeUnreadRedditNotifications(notificationItems,8);
+    const requirements:RedditEligibilityRequirement[]=[];
+    const rulesPayload=parse("rules");
+    const formattedRules=formatSubredditRulesPayload(rulesPayload);
+    const targetPayload=parse("target") as any;
+    const targetTitle=String(context.postTitle ?? targetPayload?.[0]?.data?.children?.[0]?.data?.title ?? "").trim();
+    let conditionalRequirementMode:"apply"|"exempt"|"unknown"="apply";
+    if(formattedRules) {
+      for(const rule of formattedRules.rules) {
+        const scope:RedditEligibilityScope=rule.kind==="link"?"post":rule.kind==="comment"?"comment":"all";
+        const ruleText=`${rule.short_name}\n${rule.description}`;
+        const conditional=/only applies[\s\S]{0,220}posting a \[REQUEST\][\s\S]{0,220}entering an \[OFFER\]/i.test(ruleText) && /may \[OFFER\] without meeting this requirement/i.test(ruleText);
+        if(conditional){
+          if(action==="post") conditionalRequirementMode=/^\s*\[OFFER\]/i.test(targetTitle)?"exempt":/^\s*\[REQUEST\]/i.test(targetTitle)?"apply":"unknown";
+          else if(action==="comment") conditionalRequirementMode=/^\s*\[OFFER\]/i.test(targetTitle)?"apply":targetTitle?"exempt":"unknown";
+        }
+        const extracted=extractRedditEligibilityRequirements(ruleText,"community_rule",scope);
+        if(conditionalRequirementMode!=="exempt") requirements.push(...extracted.map(req=>conditionalRequirementMode==="unknown"?{...req,confidence:"advisory" as const}:req));
+      }
+    }
+    const aboutPayload=parse("about") as any;
+    const aboutData=aboutPayload && typeof aboutPayload==="object" && aboutPayload.data && typeof aboutPayload.data==="object" ? aboutPayload.data : {};
+    const aboutText=[aboutData.public_description,aboutData.description,aboutData.submit_text].filter((v:any)=>typeof v==="string").join("\n");
+    if(aboutText && conditionalRequirementMode!=="exempt") {
+      const extracted=extractRedditEligibilityRequirements(aboutText,"community_description","all");
+      requirements.push(...extracted.map(req=>conditionalRequirementMode==="unknown"?{...req,confidence:"advisory" as const}:req));
+    }
+    const targetMessages=notificationItems.filter((item:any)=>{
+      const itemSub=String(item.subreddit ?? "").toLowerCase();
+      const context=String(item.context ?? "").toLowerCase();
+      const combined=`${String(item.subject ?? "")} ${String(item.body ?? "")}`.toLowerCase();
+      return itemSub===sub.toLowerCase() || context.includes(`/r/${sub.toLowerCase()}/`) || combined.includes(`r/${sub.toLowerCase()}`);
+    });
+    for(const item of targetMessages as any[]) {
+      if(item.notification_type!=="moderation") continue;
+      const text=`${String(item.subject ?? "")}\n${String(item.body ?? "")}`;
+      const scope:RedditEligibilityScope=/\b(?:your|this)\s+comment\b/i.test(text)?"comment":/\b(?:your|this)\s+(?:post|submission)\b/i.test(text)?"post":"all";
+      requirements.push(...extractRedditEligibilityRequirements(text,"moderation_message",scope));
+    }
+    const deduped=requirements.filter((req,index,all)=>all.findIndex(other=>other.kind===req.kind && other.minimum===req.minimum && other.scope===req.scope && other.source===req.source)===index);
+    const eligibility=action==="other" ? {status:"not_applicable",blocked:false,blockers:[],checks:[],detected_requirements:deduped.length} : evaluateRedditEligibility(profile,deduped,action);
+    const warnings:string[]=[];
+    const digest=notificationDigest as any;
+    if(Number(digest.important_count)>0) {
+      const snippets=(Array.isArray(digest.items)?digest.items:[]).filter((item:any)=>item.notification_type==="moderation").slice(0,4).map((item:any)=>{
+        const where=item.subreddit?`r/${item.subreddit}`:"Reddit";
+        return `${where} — ${String(item.summary ?? item.subject ?? "moderation notice").slice(0,220)}`;
+      });
+      warnings.push(`Reddit attention: ${digest.important_count} recent important moderation/AutoModerator notification${Number(digest.important_count)===1?"":"s"} from bell/inbox. ${snippets.join(" | ")}`.trim());
+    } else if(Number(digest.unread_count)>0) {
+      warnings.push(`Reddit attention: ${digest.unread_count} unread reply/message notification${Number(digest.unread_count)===1?" is":"s are"} waiting.`);
+    }
+    if(!(bell as any).available) warnings.push("Reddit bell preflight was unavailable; legacy inbox and subreddit eligibility sources were still checked.");
+    const unavailable=Object.entries(responses).filter(([,response])=>response.status<200 || response.status>=300).map(([key,response])=>`${key}:${response.status||"network"}`);
+    if(unavailable.length) warnings.push(`Reddit preflight was partial (${unavailable.join(", ")}); no missing check was treated as proof of eligibility.`);
+    return {backend:"browser",subreddit:sub,action,context:{post_title:targetTitle||undefined,conditional_requirement_mode:conditionalRequirementMode},profile,eligibility,notifications:{...notificationDigest,bell_available:Boolean((bell as any).available),bell_read_state:"unknown"},requirements:deduped,rules:formattedRules?{rules:formattedRules.rules,text:formattedRules.text}:undefined,warnings,fetched_at:new Date().toISOString()};
+  }
+
+  private eligibilityBlockMessage(preflight: Record<string, unknown>): string {
+    const eligibility=(preflight.eligibility ?? {}) as any;
+    const blockers=Array.isArray(eligibility.blockers)?eligibility.blockers:[];
+    const labels:Record<string,string>={comment_karma:"comment karma",post_karma:"post karma",total_karma:"total karma",account_age_days:"account age (days)"};
+    const detail=blockers.slice(0,4).map((blocker:any)=>`${labels[String(blocker.kind)] ?? blocker.kind}: needs ${blocker.minimum}, account has ${blocker.actual}`).join("; ");
+    return detail || "the account does not meet a detected subreddit eligibility requirement";
+  }
+
   async flairs(account: string, subreddit: string): Promise<unknown> {
     const sub = this.subreddit(subreddit);
     const cacheKey = `${account}:${sub.toLowerCase()}`;
@@ -377,6 +505,19 @@ export class RedditBrowserAdapter implements Adapter {
     }
     const page = await this.page(d.account, true);
     try {
+      let preflight: Record<string, unknown> | undefined;
+      let preflightWarnings: string[] = [];
+      if (["create_post","create_comment","edit","delete"].includes(d.action)) {
+        const sub=d.action==="create_post" ? this.subreddit(String(d.target.subreddit)) : this.permalink(String(d.target.url)).subreddit;
+        const preflightAction:RedditPreflightAction=d.action==="create_post"?"post":d.action==="create_comment"?"comment":"other";
+        const targetInfo=d.action==="create_comment"?this.permalink(String(d.target.url)):undefined;
+        preflight=await this.preflightOnPage(page,sub,preflightAction,{postTitle:d.action==="create_post"?String(d.content.title ?? ""):undefined,targetPostId:targetInfo?.postId});
+        preflightWarnings=Array.isArray(preflight.warnings)?preflight.warnings.map(String):[];
+        const eligibility=(preflight.eligibility ?? {}) as any;
+        if ((d.action==="create_post" || d.action==="create_comment") && eligibility.blocked) {
+          throw new PublisherError("SUBREDDIT_ELIGIBILITY_BLOCKED",`r/${sub} eligibility preflight blocked this ${preflightAction}: ${this.eligibilityBlockMessage(preflight)}. Nothing was filled or published.`,{subreddit:sub,requested_action:d.action,preflight});
+        }
+      }
       let session: PreviewSession;
       if (d.action === "create_post") session = await this.previewPost(page, d);
       else if (d.action === "create_comment") session = await this.previewComment(page, d);
@@ -386,7 +527,7 @@ export class RedditBrowserAdapter implements Adapter {
       const content = d.action === "delete" ? {} : { ...d.content };
       if (Array.isArray(content.media_files)) content.media_files = (content.media_files as MediaFile[]).map(file=>({name:file.name,mime_type:file.mime_type,size:file.size,sha256:file.sha256}));
       return { summary: { backend: "browser", action: d.action, account: d.account, target: d.target, target_identity: session.targetIdentity,
-        content, current_url: page.url(), notice: "The exact Reddit form is ready; no Post/Comment/Save/Delete action was clicked." }, artifact_path: artifact };
+        content, current_url: page.url(), preflight, notice: "The exact Reddit form is ready; no Post/Comment/Save/Delete action was clicked." }, artifact_path: artifact, warnings: preflightWarnings };
     } finally {
       this.chrome.release(d.account);
     }

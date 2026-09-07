@@ -68,6 +68,7 @@ export class PublisherService {
       this.store.audit("draft.previewed", actor, id, { preview_digest: pd, artifact: Boolean(p.artifact_path) });
       return envelope({ state: p.requires_user ? "NEEDS_USER" : "PREVIEWED", adapter: d.adapter, account: d.account,
         draft_id: id, revision: d.revision, preview: { digest: pd, summary: p.summary, artifact_path: p.artifact_path, artifact_sha256, expires_at: expires },
+        warnings: p.warnings ?? [],
         next_actions: p.requires_user ? [{ tool: "auth_login", required: true }] : [{ tool: "owner_cli_approve", required: true, args: { draft_id: id, preview_digest: pd } }] });
     } catch (e: any) {
       try { this.store.audit("draft.preview_failed", actor, id, { code: e?.code ?? undefined, error: String(e?.message ?? e).slice(0, 500) }); } catch {}
@@ -199,6 +200,8 @@ export class PublisherService {
       }});
     } catch(e:any) { return this.fail(e,id); }
   }
+
+  async redditPreflight(account: string, subreddit: string, action: "post"|"comment" = "post", context: {post_title?:string;target_url?:string} = {}): Promise<ResultEnvelope> { try { return envelope({ adapter:"reddit", account:this.effectiveAccount("reddit",account), result:await (this.adapter("reddit") as RedditBrowserAdapter).preflight(this.effectiveAccount("reddit",account),subreddit,action,context) }); } catch(e:any){return this.fail(e);} }
 
   async rules(account: string, subreddit: string): Promise<ResultEnvelope> { try { return envelope({ adapter: "reddit", result: await (this.adapter("reddit") as RedditBrowserAdapter).rules(this.effectiveAccount("reddit",account), subreddit) }); } catch(e:any){return this.fail(e);} }
   async flairs(account: string, subreddit: string): Promise<ResultEnvelope> { try { return envelope({ adapter: "reddit", result: await (this.adapter("reddit") as RedditBrowserAdapter).flairs(this.effectiveAccount("reddit",account), subreddit) }); } catch(e:any){return this.fail(e);} }

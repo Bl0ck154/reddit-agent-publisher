@@ -4,6 +4,9 @@ import {
   canonicalRedditThreadTarget,
   normalizeActivityPayload,
   normalizeInboxPayload,
+  normalizeRedditBellDetailHtml,
+  normalizeRedditBellListHtml,
+  mergeRedditNotificationItems,
   normalizeThreadPayload,
 } from "../reddit-read.js";
 import { redditUsernameFromProfileHref } from "../reddit-identity.js";
@@ -78,4 +81,50 @@ test("Reddit username parser accepts only exact profile links", () => {
   assert.equal(redditUsernameFromProfileHref("/user/EfficiencyGood4815/"), "EfficiencyGood4815");
   assert.equal(redditUsernameFromProfileHref("/user/stadt_wien/comments/abc123/title/"), undefined);
   assert.equal(redditUsernameFromProfileHref("https://www.reddit.com/user/example/"), undefined);
+});
+
+
+test("parses current Shreddit bell announcement cards without relying on UI navigation",()=>{
+  const html=`<notification-announcement announcement-id="ann_test1" notification-telemetry-data="{&quot;title&quot;:&quot;AutoModerator notification&quot;,&quot;body&quot;:&quot;https://www.reddit.com/r/GiftofGames/comments/abc/offer/p123/ …&quot;}">
+    <div data-testid="title"><span>u/AutoModerator - AutoModerator notification</span></div>
+    <div data-testid="body">https://www.reddit.com/r/GiftofGames/comments/abc/offer/p123/ …</div>
+    <faceplate-timeago ts="2026-09-07T16:47:45.487Z"></faceplate-timeago>
+    <announcement-overflow-menu announcement-id="ann_test1" author-name="AutoModerator" author-id="t2_6l4z3"></announcement-overflow-menu>
+  </notification-announcement>`;
+  const items=normalizeRedditBellListHtml(html) as any[];
+  assert.equal(items.length,1);
+  assert.equal(items[0].announcement_id,"ann_test1");
+  assert.equal(items[0].author,"AutoModerator");
+  assert.equal(items[0].subreddit,"GiftofGames");
+  assert.equal(items[0].read_state,"unknown");
+  assert.equal(items[0].notification_url,"https://www.reddit.com/notifications/a/ann_test1");
+});
+
+test("parses full Shreddit bell detail with exact AutoModerator removal reason",()=>{
+  const html=`<announcement-detail>
+    <span class="text-16 font-bold">AutoModerator notification</span>
+    <faceplate-timeago ts="2026-09-07T16:47:45.487234+0000"></faceplate-timeago>
+    <announcement-overflow-menu announcement-id="ann_test1" subject="AutoModerator notification" author-name="AutoModerator" author-id="t2_6l4z3"></announcement-overflow-menu>
+    <span class="message-body"><div><p><a href="https://www.reddit.com/r/GiftofGames/comments/abc/offer/p123/">target</a></p>
+      <p><strong>YOUR COMMENT HAS BEEN REMOVED</strong></p>
+      <p><strong>Reason</strong>: You need 300+ <strong>COMMENT</strong> karma and a 2 month old account. Comment karma is NOT post karma or total karma.</p></div></span>
+  </announcement-detail>`;
+  const item=normalizeRedditBellDetailHtml(html,"ann_test1") as any;
+  assert.equal(item.id,"ann_test1");
+  assert.equal(item.subreddit,"GiftofGames");
+  assert.match(item.body,/YOUR COMMENT HAS BEEN REMOVED/);
+  assert.match(item.body,/300\+ COMMENT karma/);
+  assert.equal(item.context,"https://www.reddit.com/r/GiftofGames/comments/abc/offer/p123/");
+});
+
+test("bell moderation item wins cross-source deduplication for the same Reddit target",()=>{
+  const target="https://www.reddit.com/r/GiftofGames/comments/abc/offer/p123/";
+  const merged=mergeRedditNotificationItems(
+    [{id:"ann_test1",source:"reddit-bell",notification_type:"moderation",important:true,target_url:target,context:target,body:"full bell reason"}],
+    [{id:"legacy1",source:"reddit-inbox",notification_type:"moderation",important:true,context:target,body:"short legacy reason"}],
+    10,
+  ) as any[];
+  assert.equal(merged.length,1);
+  assert.equal(merged[0].id,"ann_test1");
+  assert.equal(merged[0].body,"full bell reason");
 });

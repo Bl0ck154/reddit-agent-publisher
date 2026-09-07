@@ -1,9 +1,11 @@
 import type { Page } from "playwright-core";
 import { ExternalChrome } from "./external-chrome.js";
 import { detectRedditUsername } from "./reddit-identity.js";
+import { classifyRedditNotification } from "./reddit-preflight.js";
 
 type JsonObject = Record<string, unknown>;
 type ActivityKind = "all" | "posts" | "comments";
+const redditBellCache = new WeakMap<Page,{expiresAt:number;value:JsonObject}>();
 
 type RedditThreadTarget = {
   subreddit: string;
@@ -278,6 +280,141 @@ export function normalizeInboxPayload(payload: unknown): JsonObject[] {
   return listingChildren(payload).map(normalizeInboxItem).filter((item): item is JsonObject => item !== undefined);
 }
 
+
+function decodeRedditHtml(raw: string): string {
+  return String(raw ?? "")
+    .replace(/&#(x?[0-9a-f]+);/gi,(_,code)=>String.fromCodePoint(code[0].toLowerCase()==="x"?parseInt(code.slice(1),16):parseInt(code,10)))
+    .replace(/&quot;/gi,'"').replace(/&#39;|&apos;/gi,"'").replace(/&lt;/gi,"<").replace(/&gt;/gi,">").replace(/&amp;/gi,"&");
+}
+
+function redditHtmlText(raw: string): string {
+  return decodeRedditHtml(String(raw ?? "")
+    .replace(/<br\s*\/?\s*>/gi,"\n")
+    .replace(/<\/(?:p|div|li|h[1-6])>/gi,"\n")
+    .replace(/<[^>]+>/g," "))
+    .replace(/[ \t]+/g," ").replace(/\n\s+/g,"\n").replace(/\n{3,}/g,"\n\n").trim();
+}
+
+function htmlAttr(raw: string, name: string): string | undefined {
+  const escaped=name.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+  const match=String(raw ?? "").match(new RegExp(`\\b${escaped}=(?:"([^"]*)"|'([^']*)')`,"i"));
+  return match ? decodeRedditHtml(match[1] ?? match[2] ?? "") : undefined;
+}
+
+function redditSubredditFromUrl(value: unknown): string | undefined {
+  const raw=string(value); if(!raw) return undefined;
+  try { return new URL(raw).pathname.match(/^\/r\/([A-Za-z0-9_]{2,21})(?:\/|$)/i)?.[1]; } catch { return undefined; }
+}
+
+function firstRedditHref(raw: string): string | undefined {
+  for(const match of String(raw ?? "").matchAll(/\bhref=(?:"([^"]+)"|'([^']+)')/gi)) {
+    const url=redditUrl(decodeRedditHtml(match[1] ?? match[2] ?? ""));
+    if(url && /\/r\/[A-Za-z0-9_]{2,21}\//i.test(new URL(url).pathname)) return url;
+  }
+  const text=decodeRedditHtml(raw);
+  const direct=text.match(/https:\/\/(?:www\.|old\.|new\.)?reddit\.com\/r\/[A-Za-z0-9_]{2,21}\/[^\s<"']+/i)?.[0];
+  return direct ? redditUrl(direct.replace(/[),.;]+$/,"")) : undefined;
+}
+
+export function normalizeRedditBellListHtml(html: string): JsonObject[] {
+  const out:JsonObject[]=[];
+  for(const match of String(html ?? "").matchAll(/<notification-announcement\b([^>]*)>([\s\S]*?)<\/notification-announcement>/gi)) {
+    const attrs=match[1], bodyHtml=match[2];
+    const id=htmlAttr(attrs,"announcement-id"); if(!id || !/^ann_[A-Za-z0-9_-]+$/.test(id)) continue;
+    const telemetryRaw=htmlAttr(attrs,"notification-telemetry-data");
+    let telemetry:JsonObject={}; try { telemetry=telemetryRaw ? JSON.parse(telemetryRaw) as JsonObject : {}; } catch {}
+    const titleMatch=bodyHtml.match(/<div\b[^>]*data-testid=(?:"title"|'title')[^>]*>([\s\S]*?)<\/div>/i);
+    const bodyMatch=bodyHtml.match(/<div\b[^>]*data-testid=(?:"body"|'body')[^>]*>([\s\S]*?)<\/div>/i);
+    const timeAttrs=bodyHtml.match(/<faceplate-timeago\b([^>]*)>/i)?.[1] ?? "";
+    const menuAttrs=bodyHtml.match(/<announcement-overflow-menu\b([^>]*)>/i)?.[1] ?? "";
+    const title=redditHtmlText(titleMatch?.[1] ?? "") || string(telemetry.title) || "Reddit notification";
+    const bodyPreview=redditHtmlText(bodyMatch?.[1] ?? "") || string(telemetry.body) || "";
+    const targetUrl=firstRedditHref(bodyHtml) ?? firstRedditHref(bodyPreview);
+    const createdAt=htmlAttr(timeAttrs,"ts");
+    out.push({
+      id, announcement_id:id, kind:"announcement", source:"reddit-bell", subject:title,
+      author:htmlAttr(menuAttrs,"author-name"), author_fullname:htmlAttr(menuAttrs,"author-id"),
+      body:bodyPreview, body_preview:bodyPreview, created_at:createdAt, target_url:targetUrl, context:targetUrl,
+      subreddit:redditSubredditFromUrl(targetUrl), notification_url:`https://www.reddit.com/notifications/a/${id}`,
+      read_state:"unknown",
+    });
+  }
+  return out;
+}
+
+export function normalizeRedditBellDetailHtml(html: string, expectedId?: string): JsonObject | undefined {
+  const detail=String(html ?? "").match(/<announcement-detail\b[^>]*>([\s\S]*?)<\/announcement-detail>/i)?.[1];
+  if(!detail) return undefined;
+  const menuAttrs=detail.match(/<announcement-overflow-menu\b([^>]*)>/i)?.[1] ?? "";
+  const id=htmlAttr(menuAttrs,"announcement-id") ?? expectedId;
+  if(!id || !/^ann_[A-Za-z0-9_-]+$/.test(id) || (expectedId && id!==expectedId)) return undefined;
+  const title=redditHtmlText(detail.match(/<span\b[^>]*class=(?:"[^"]*text-16[^\"]*font-bold[^\"]*"|'[^']*text-16[^']*font-bold[^']*')[^>]*>([\s\S]*?)<\/span>/i)?.[1] ?? "") || htmlAttr(menuAttrs,"subject") || "Reddit notification";
+  const messageHtml=detail.match(/<span\b[^>]*class=(?:"[^"]*message-body[^"]*"|'[^']*message-body[^']*')[^>]*>([\s\S]*?)<\/span>/i)?.[1] ?? "";
+  const body=redditHtmlText(messageHtml);
+  const timeAttrs=detail.match(/<faceplate-timeago\b([^>]*)>/i)?.[1] ?? "";
+  const targetUrl=firstRedditHref(messageHtml);
+  return {
+    id, announcement_id:id, kind:"announcement", source:"reddit-bell", subject:title,
+    author:htmlAttr(menuAttrs,"author-name"), author_fullname:htmlAttr(menuAttrs,"author-id"), body,
+    created_at:htmlAttr(timeAttrs,"ts"), target_url:targetUrl, context:targetUrl,
+    subreddit:redditSubredditFromUrl(targetUrl), notification_url:`https://www.reddit.com/notifications/a/${id}`,
+    read_state:"unknown",
+  };
+}
+
+export function mergeRedditNotificationItems(bellItems: JsonObject[], inboxItems: JsonObject[], limit=25): JsonObject[] {
+  const out:JsonObject[]=[]; const seen=new Set<string>();
+  for(const item of [...bellItems,...inboxItems]) {
+    const target=String(item.target_url ?? item.context ?? "").replace(/[?#].*$/,"").replace(/\/$/,"").toLowerCase();
+    const moderation=String(item.notification_type ?? "") === "moderation" || Boolean(item.important);
+    const key=moderation && target ? `target:${target}` : `${String(item.source ?? "inbox")}:${String(item.id ?? item.fullname ?? target)}`;
+    if(seen.has(key)) continue; seen.add(key); out.push(item);
+    if(out.length>=Math.max(1,limit)) break;
+  }
+  return out;
+}
+
+export async function fetchRedditBellNotifications(page: Page, limit=20): Promise<JsonObject> {
+  const safeLimit=Math.max(1,Math.min(20,Math.floor(limit)));
+  const cached=redditBellCache.get(page);
+  if(cached && cached.expiresAt>Date.now()) {
+    const items=Array.isArray((cached.value as any).items)?(cached.value as any).items.slice(0,safeLimit):[];
+    return {...cached.value,items,count:items.length,cached:true};
+  }
+  const listResponse=await page.evaluate(async()=>{
+    const controller=new AbortController(); const timer=setTimeout(()=>controller.abort(),8_000);
+    try {
+      const response=await fetch("/svc/shreddit/notifications-inbox-content/20/route",{method:"GET",credentials:"include",headers:{Accept:"text/html"},signal:controller.signal});
+      return {status:response.status,url:response.url,text:(await response.text()).slice(0,700_000)};
+    } catch(error:any) { return {status:0,url:"/svc/shreddit/notifications-inbox-content/20/route",text:String(error?.message ?? error).slice(0,500)}; }
+    finally { clearTimeout(timer); }
+  });
+  if(listResponse.status<200 || listResponse.status>=300) return {available:false,status:listResponse.status||0,items:[],count:0,note:"Current Reddit bell GET endpoint was unavailable; inbox fallback remains usable."};
+  const list=normalizeRedditBellListHtml(listResponse.text).slice(0,safeLimit);
+  const detailIds=list.filter((item:any)=>/^AutoModerator$/i.test(String(item.author ?? "")) || /(?:moderator|removed|filtered|karma|requirement|ban)/i.test(`${String(item.subject ?? "")} ${String(item.body ?? "")}`)).slice(0,10).map((item:any)=>String(item.id));
+  const details:Record<string,JsonObject>={};
+  if(detailIds.length) {
+    const responses=await page.evaluate(async(ids:string[])=>{
+      return await Promise.all(ids.map(async id=>{
+        const controller=new AbortController(); const timer=setTimeout(()=>controller.abort(),8_000);
+        try {
+          const response=await fetch(`/notifications/a/${encodeURIComponent(id)}`,{method:"GET",credentials:"include",headers:{Accept:"text/html"},signal:controller.signal});
+          return {id,status:response.status,text:(await response.text()).slice(0,700_000)};
+        } catch(error:any) { return {id,status:0,text:String(error?.message ?? error).slice(0,500)}; }
+        finally { clearTimeout(timer); }
+      }));
+    },detailIds);
+    for(const response of responses) {
+      if(response.status<200 || response.status>=300) continue;
+      const parsed=normalizeRedditBellDetailHtml(response.text,response.id); if(parsed) details[response.id]=parsed;
+    }
+  }
+  const items=list.map((item:any)=>classifyRedditNotification(details[String(item.id)] ? {...item,...details[String(item.id)],body_preview:item.body_preview} : item));
+  const value:JsonObject={available:true,status:listResponse.status,items,count:items.length,detail_count:Object.keys(details).length,read_state:"unknown",cached:false,fetched_at:new Date().toISOString()};
+  redditBellCache.set(page,{expiresAt:Date.now()+30_000,value});
+  return value;
+}
+
 export class RedditReader {
   constructor(private chrome: ExternalChrome) {}
 
@@ -323,10 +460,17 @@ export class RedditReader {
     return this.withPage(account, async page => {
       const username = await this.username(page);
       const endpoint = unreadOnly ? "/message/unread.json" : "/message/inbox.json";
-      const payload = await this.fetchJson(page, `${endpoint}?raw_json=1&limit=${safeLimit}`);
-      const items = normalizeInboxPayload(payload).filter(item => Boolean(item.was_comment) || /reply|mention/i.test(String(item.subject ?? "")));
+      let inboxItems:JsonObject[]=[]; let inboxAvailable=true;
+      try { inboxItems=normalizeInboxPayload(await this.fetchJson(page, `${endpoint}?raw_json=1&limit=${safeLimit}`)).map(item=>classifyRedditNotification(item)); }
+      catch { inboxAvailable=false; }
+      const bell=await fetchRedditBellNotifications(page,Math.min(safeLimit,20)).catch(()=>({available:false,items:[],count:0,status:0} as JsonObject));
+      const bellItems=Array.isArray((bell as any).items)?(bell as any).items as JsonObject[]:[];
+      const items=mergeRedditNotificationItems(bellItems,inboxItems,safeLimit);
       return { username, unread_only: unreadOnly, items, count: items.length, fetched_at: new Date().toISOString(),
-        source: "reddit-safe-inbox", note: "Reply and mention notifications are read without opening Reddit's bell page, because opening the bell page can mark notifications as read. Bell-only engagement events such as vote milestones are intentionally not included." };
+        source:(bell as any).available?"reddit-shreddit-bell+safe-inbox":"reddit-safe-inbox", bell_available:Boolean((bell as any).available), bell_read_state:"unknown", inbox_available:inboxAvailable,
+        note:(bell as any).available
+          ? "Current Reddit bell announcements are read through Reddit's authenticated GET-only Shreddit endpoint; important AutoModerator/moderation cards are enriched through GET-only announcement detail pages. No bell UI is opened and this reader sends no mark-as-read mutation. Bell read/unread state is not inferred when Reddit does not expose it deterministically. Legacy inbox replies/messages are merged as a fallback."
+          : "Current Reddit bell GET endpoint was unavailable, so notifications fell back to the safe Reddit inbox. No bell UI was opened and no mark-as-read mutation was sent." };
     });
   }
 

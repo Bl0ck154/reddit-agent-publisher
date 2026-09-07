@@ -108,6 +108,7 @@ program.command("publish <draft-id>").requiredOption("--approval <token>").actio
 program.command("login").option("--account <id>", "account", "default").action(o => call("login", { adapter:"reddit",account:o.account }));
 program.command("status").option("--account <id>", "account", "default").action(o => call("status", { adapter:"reddit",account:o.account }));
 program.command("pending").action(() => call("pending"));
+program.command("reddit-preflight <subreddit>").option("--account <id>", "account", "default").option("--action <kind>", "post or comment", "post").action((subreddit,o) => call("reddit_preflight", {subreddit,account:o.account,action:o.action}));
 program.command("reddit-rules <subreddit>").option("--account <id>", "account", "default").action((subreddit,o) => call("reddit_rules", {subreddit,account:o.account}));
 program.command("reddit-flairs <subreddit>").option("--account <id>", "account", "default").action((subreddit,o) => call("reddit_flairs", {subreddit,account:o.account}));
 program.command("reddit-thread <url>")

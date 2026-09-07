@@ -109,6 +109,14 @@ Typical flow:
 
 `previewRedditPost` accepts 1–4 ChatGPT conversation images through `openaiFileIdRefs`. Files are downloaded immediately into the protected local artifacts directory, validated by payload signature, and used only for the matching preview.
 
+### Reddit eligibility + attention preflight
+
+`getRedditPreflight` is read-only and accepts a subreddit plus `action=post|comment`. It reads the connected Reddit account’s **separate** comment/post/total karma and account age, subreddit rules/about metadata, the current Reddit bell through a GET-only Shreddit route, GET-only full detail for important AutoModerator/moderation announcements, and up to 100 legacy inbox items. AutoModerator/moderator removals and requirement messages are classified as important; bell read/unread state stays `unknown` unless Reddit exposes it deterministically. Numeric karma/account-age requirements are compared against the live account.
+
+The same preflight is enforced automatically by the browser adapter before a Reddit post/comment form is filled. A high-confidence unmet requirement returns `SUBREDDIT_ELIGIBILITY_BLOCKED` before any Post/Comment button is clicked. Preview/publish responses may also include `warnings` with recent important bell/inbox moderation notices; clients should surface those notices even when the requested write itself succeeds. Bell fetches have hard timeouts and fall back to inbox/rules rather than hanging a publish.
+
+This is deliberately conservative: a rule containing explicit exemption/exception language is treated as advisory rather than a hard blocker, and a missing/failed metadata source is reported as a partial preflight instead of being treated as proof of eligibility.
+
 ### Ambiguous publish outcomes
 
 A network/tool-layer error does not prove that a consequential Reddit write failed. Successful publish responses include `published: true`, `status: "PUBLISHED"`, and the exact `draft_id`. If the Actions client reports a technical error during or immediately after publish, call the read-only `getPublicationStatus` for that draft before retrying. A returned `published: true` / `PUBLISHED` is definitive success and must not be retried; this prevents duplicate posts/comments when the client loses a successful response.

@@ -50,6 +50,7 @@ server.registerTool("reddit_delete_prepare", {
 server.registerTool("auth_login", { description:"Open a persistent browser for manual login, 2FA, or CAPTCHA takeover. Never accepts passwords.", inputSchema:{adapter:z.enum(["reddit"]),account} }, p=>run("login",{adapter:p.adapter,account:p.account}));
 server.registerTool("account_status", { description:"Read authentication status.", inputSchema:{adapter:z.enum(["reddit"]).optional(),account} }, p=>run("status",p));
 server.registerTool("pending_list", { description:"List drafts that are not complete.", inputSchema:{} }, p=>run("pending",p));
+server.registerTool("reddit_preflight", { description:"Read-only Reddit eligibility/attention preflight. Checks separate karma, account age, subreddit rules/about text, current GET-only Reddit bell announcements plus legacy inbox notices before a post/comment.", inputSchema:{subreddit:z.string().regex(/^[A-Za-z0-9_]{2,21}$/),action:z.enum(["post","comment"]).default("post"),post_title:z.string().max(500).optional(),target_url:redditUrl.optional(),account} }, p=>run("reddit_preflight",p));
 server.registerTool("reddit_rules", { description:"Read subreddit rules through the persistent Reddit browser; no API credentials required.", inputSchema:{subreddit:z.string().regex(/^[A-Za-z0-9_]{2,21}$/),account} }, p=>run("reddit_rules",p));
 server.registerTool("reddit_flairs", { description:"Read available post flair from the Reddit create-post UI; no API credentials required and nothing is submitted.", inputSchema:{subreddit:z.string().regex(/^[A-Za-z0-9_]{2,21}$/),account} }, p=>run("reddit_flairs",p));
 server.registerTool("reddit_thread_get", {
@@ -64,7 +65,7 @@ server.registerTool("reddit_inbox", {
   description:"Read the authenticated owner's Reddit inbox/replies. Read-only; unread_only defaults to true.",
   inputSchema:{account,unread_only:z.boolean().default(true),limit:z.number().int().min(1).max(100).default(25)}
 }, p=>run("reddit_inbox",p));
-server.registerTool("reddit_notifications", { description:"Read reply and mention notifications without opening Reddit's bell page or marking them read.", inputSchema:{account,unread_only:z.boolean().default(true),limit:z.number().int().min(1).max(100).default(25)} }, p=>run("reddit_notifications",p));
+server.registerTool("reddit_notifications", { description:"Read current Reddit bell announcements through GET-only Shreddit routes plus legacy inbox replies/messages. No bell UI is opened and no mark-as-read mutation is sent.", inputSchema:{account,unread_only:z.boolean().default(true),limit:z.number().int().min(1).max(100).default(25)} }, p=>run("reddit_notifications",p));
 server.registerTool("reddit_chat_list", { description:"Read current Reddit Chat conversations/DMs. Read-only.", inputSchema:{account,unread_only:z.boolean().default(false),limit:z.number().int().min(1).max(100).default(25)} }, p=>run("reddit_chat_list",p));
 server.registerTool("reddit_chat_get", { description:"Read recent messages from one exact Reddit Chat room_id returned by reddit_chat_list. Read-only.", inputSchema:{account,room_id:z.string().min(4).max(260),limit:z.number().int().min(1).max(100).default(50)} }, p=>run("reddit_chat_get",p));
 server.registerTool("reddit_chat_attachment_get", {

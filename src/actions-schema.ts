@@ -17,7 +17,7 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
     jsonSchemaDialect: "https://json-schema.org/draft/2020-12/schema",
     info: {
       title: "Reddit Agent Publisher Actions",
-      version: "1.2.1",
+      version: "1.2.2",
       description: "Owner-only GPT Actions gateway for Reddit Agent Publisher. Reddit context operations are read-only. Preview operations never submit content. Finalized Reddit posts/comments can use one-step consequential publish actions; legacy publishPublication publishes an existing exact preview.",
     },
     servers: [{ url: server }],
@@ -32,6 +32,22 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
           parameters: [
             { name: "adapter", in: "query", required: false, schema: { type: "string", enum: ["reddit"] } },
             { name: "account", in: "query", required: false, schema: account },
+          ],
+          responses: { "200": okResponse },
+        },
+      },
+      "/v1/reddit/preflight": {
+        get: {
+          operationId: "getRedditPreflight",
+          "x-openai-isConsequential": false,
+          summary: "Check Reddit account eligibility and important notifications before posting",
+          description: "Read-only. Checks the connected account's separate comment/post/total karma and account age, current subreddit rules/about text, current GET-only Reddit bell announcements with important AutoModerator detail, and legacy inbox notices. Numeric requirements detected with high confidence are compared with the live account. This same preflight is enforced again automatically when a Reddit post/comment preview is prepared, so the agent must not bypass a returned eligibility blocker.",
+          parameters: [
+            { name:"subreddit",in:"query",required:true,schema:{type:"string"} },
+            { name:"action",in:"query",required:false,schema:{type:"string",enum:["post","comment"],default:"post"} },
+            { name:"post_title",in:"query",required:false,schema:{type:"string"},description:"For action=post, pass the finalized title when known so conditional rules such as [OFFER] exemptions can be evaluated accurately." },
+            { name:"target_url",in:"query",required:false,schema:{type:"string",format:"uri"},description:"For action=comment, pass the exact Reddit post/comment permalink when known so eligibility can be scoped to the target post type." },
+            { name:"account",in:"query",required:false,schema:account },
           ],
           responses: { "200": okResponse },
         },
@@ -124,7 +140,7 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
           operationId: "publishRedditPost",
           "x-openai-isConsequential": true,
           summary: "Publish a finalized Reddit post in one step",
-          description: "CONSEQUENTIAL. Use when the user has explicitly asked to publish/post this finalized content in any still-relevant earlier or current turn. That authorization persists for this exact unchanged content/target across transient failures, unavailable tools, authentication recovery, and retry/status follow-ups. Do not ask for an additional chat confirmation before calling this action; ChatGPT's action-approval UI handles any required approval.",
+          description: "CONSEQUENTIAL. Use when the user has explicitly asked to publish/post this finalized content in any still-relevant earlier or current turn. The Publisher automatically runs an eligibility + notification preflight before filling the Reddit form and blocks known unmet karma/account-age requirements before any post is submitted. That authorization persists for this exact unchanged content/target across transient failures, unavailable tools, authentication recovery, and retry/status follow-ups. Do not ask for an additional chat confirmation before calling this action; ChatGPT's action-approval UI handles any required approval.",
           requestBody: jsonBody({
             type: "object", required: ["subreddit", "title"], additionalProperties: false,
             properties: {
@@ -145,7 +161,7 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
           operationId: "publishRedditComment",
           "x-openai-isConsequential": true,
           summary: "Publish a finalized Reddit comment in one step",
-          description: "CONSEQUENTIAL. Use when the user has explicitly asked to post this finalized comment/reply to this exact Reddit target in any still-relevant earlier or current turn. That authorization persists for the exact unchanged reply/target across transient failures, unavailable tools, authentication recovery, and retry/status follow-ups. Do not ask for an additional chat confirmation before calling this action.",
+          description: "CONSEQUENTIAL. Use when the user has explicitly asked to post this finalized comment/reply to this exact Reddit target in any still-relevant earlier or current turn. The Publisher automatically runs an eligibility + notification preflight before filling the Reddit reply form and blocks known unmet karma/account-age requirements before submission. That authorization persists for the exact unchanged reply/target across transient failures, unavailable tools, authentication recovery, and retry/status follow-ups. Do not ask for an additional chat confirmation before calling this action.",
           requestBody: jsonBody({
             type: "object", required: ["url", "body"], additionalProperties: false,
             properties: { url: { type: "string", format: "uri" }, body: { type: "string" }, body_format: bodyFormat, account },
@@ -274,7 +290,7 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
           type: "object", required: ["ok", "message"],
           properties: {
             ok: { type: "boolean" }, message: { type: "string" }, draft_id: { type: "string" }, preview_digest: { type: "string" },
-            expires_at: { type: "string" }, preview: { type: "object", additionalProperties: true }, error_code: { type: "string" },
+            expires_at: { type: "string" }, preview: { type: "object", additionalProperties: true }, warnings: { type:"array",items:{type:"string"},description:"Important Reddit notifications or preflight caveats that should be surfaced to the owner." }, error_code: { type: "string" },
             authorization_policy: { type: "string", description: "For Reddit post/comment/chat-reply/edit previews: earlier explicit authorization for the exact unchanged content and target persists across transient failures and retry/status follow-ups." },
             next_step_if_already_authorized: { type: "string", enum: ["publishPublication"], description: "When prior explicit authorization is still valid, call this operation immediately instead of asking for another chat confirmation." },
           },

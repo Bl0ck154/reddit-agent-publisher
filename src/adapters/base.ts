@@ -4,6 +4,7 @@ export interface PreviewData {
   summary: Record<string, unknown>;
   artifact_path?: string;
   requires_user?: boolean;
+  warnings?: string[];
 }
 
 export interface PublishData {

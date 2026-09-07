@@ -186,7 +186,7 @@ function previewOutput(env: ResultEnvelope, kind: PreviewKind): Record<string, u
     ? { authorization_policy:persistentAuthorization, next_step_if_already_authorized:"publishPublication" }
     : {};
   return { ok:true, message:labels[kind], draft_id:env.draft_id, preview_digest:preview?.digest,
-    expires_at:preview?.expires_at, preview:preview?.summary, ...redditAuthorizedNextStep };
+    expires_at:preview?.expires_at, preview:preview?.summary, warnings:env.warnings ?? [], ...redditAuthorizedNextStep };
 }
 
 function publishOutput(env: ResultEnvelope): Record<string, unknown> {
@@ -221,6 +221,7 @@ async function prepareAndPublish(input: Record<string, unknown>): Promise<Record
   const previewDigest = (preview.preview as any)?.digest;
   if (!previewDigest) return { ok:false, message:"The publisher could not bind the live preview to this write. Nothing was published.", error_code:"PREVIEW_DIGEST_MISSING" };
   const published = await local("action_publish_confirmed", { draft_id:prepared.draft_id, preview_digest:previewDigest });
+  if (preview.warnings?.length) published.warnings=[...new Set([...(preview.warnings ?? []),...(published.warnings ?? [])])];
   return publishOutput(published);
 }
 
@@ -243,6 +244,13 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (publicationStatusMatch) {
     const env=await local("publication_status",{draft_id:publicationStatusMatch[1]});
     json(res,200,readOutput(env,"Publication status checked. Treat data.published=true or data.status=PUBLISHED as definitive success; do not retry that write.")); return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/v1/reddit/preflight") {
+    const subreddit=url.searchParams.get("subreddit") ?? ""; const account=url.searchParams.get("account") ?? "default"; const action=url.searchParams.get("action") ?? "post"; const post_title=url.searchParams.get("post_title") ?? undefined; const target_url=url.searchParams.get("target_url") ?? undefined;
+    if(!/^[A-Za-z0-9_]{2,21}$/.test(subreddit) || !["post","comment"].includes(action)){json(res,400,{ok:false,message:"Invalid Reddit preflight query."});return;}
+    const env=await local("reddit_preflight",{subreddit,account,action,post_title,target_url});
+    json(res,200,readOutput(env,"Reddit eligibility and notification preflight checked.")); return;
   }
 
   if (req.method === "GET" && url.pathname === "/v1/status") {
@@ -273,7 +281,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     json(res,200,readOutput(env,"Reddit inbox loaded.")); return;
   }
   if (req.method === "GET" && url.pathname === "/v1/reddit/notifications") {
-    const q = InboxQuery.parse(Object.fromEntries(url.searchParams)); const env = await local("reddit_notifications", q); json(res,200,readOutput(env,"Reddit reply/mention notifications loaded.")); return;
+    const q = InboxQuery.parse(Object.fromEntries(url.searchParams)); const env = await local("reddit_notifications", q); json(res,200,readOutput(env,"Reddit bell and inbox notifications loaded, including full AutoModerator/moderation details when available.")); return;
   }
   if (req.method === "GET" && url.pathname === "/v1/reddit/chats") {
     const q = ChatListQuery.parse(Object.fromEntries(url.searchParams)); const env = await local("reddit_chat_list", q); json(res,200,readOutput(env,"Reddit Chat conversations loaded.")); return;
