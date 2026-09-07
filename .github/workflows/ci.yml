@@ -18,3 +18,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      - name: Smoke packaged CLI
+        run: |
+          mkdir -p /tmp/publisher-pack /tmp/publisher-install
+          ARCHIVE="$(npm pack --ignore-scripts --pack-destination /tmp/publisher-pack --silent | tail -n 1)"
+          npm install --prefix /tmp/publisher-install --ignore-scripts --no-audit --no-fund "/tmp/publisher-pack/$ARCHIVE"
+          /tmp/publisher-install/node_modules/.bin/reddit-agent-publisher --help | grep -q "setup"
