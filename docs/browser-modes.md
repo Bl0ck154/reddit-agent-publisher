@@ -1,10 +1,89 @@
 # Browser modes
 
-Reddit Agent Publisher supports two ways to use Chrome. Both keep Reddit authentication in a normal owner-controlled browser profile.
+Reddit Agent Publisher keeps Reddit authentication in an owner-controlled Chrome profile. The recommended path is now the setup command; the manual modes remain available for advanced deployments.
 
-## Portable local-CDP mode
+## Recommended: setup-managed install
 
-This is the easiest way to run the public project on an existing machine. Start Chrome yourself with a loopback-only debugging port:
+From the GitHub repository package:
+
+```bash
+npx -y github:Bl0ck154/reddit-agent-publisher setup
+```
+
+After an npm registry release, the shorter equivalent is:
+
+```bash
+npx -y reddit-agent-publisher setup
+```
+
+The setup command:
+
+- detects Chrome/Chromium;
+- creates the private state directory and a 32-byte AES master key;
+- writes `config.json` without overwriting unrelated existing settings;
+- creates a stable runtime copy under the state directory so systemd does not depend on an npm cache path;
+- installs a user `publisherd` service and a per-account Chrome service when systemd is available;
+- generates Codex, Claude Desktop, OpenCode, and generic MCP config snippets;
+- opens the normal Reddit login flow when a usable owner-controlled desktop is available.
+
+Setup is safe to rerun. In particular, it does **not** rotate an existing master key or replace an authenticated Chrome profile.
+
+Useful variants:
+
+```bash
+reddit-agent-publisher setup --mode desktop --client codex
+reddit-agent-publisher setup --mode server --client claude
+reddit-agent-publisher setup --no-systemd
+reddit-agent-publisher setup --non-interactive
+```
+
+## Desktop behavior
+
+On Linux with a working systemd user session, setup installs:
+
+```text
+~/.config/systemd/user/reddit-agent-publisher.service
+~/.config/systemd/user/reddit-agent-publisher-browser@.service
+```
+
+The daemon starts automatically. Chrome is started on demand for the configured account, keeps its persistent profile under the Publisher state directory, and can be stopped after the configured idle period.
+
+If user systemd is unavailable, setup falls back to a loopback-only portable CDP Chrome plus a detached local daemon. No public debugging port is opened.
+
+## Headless Linux server
+
+Use:
+
+```bash
+reddit-agent-publisher setup --mode server
+```
+
+The Publisher daemon and browser service are still user-scoped. If `Xvfb` is already installed, setup also creates a private `:98` virtual desktop. If `x11vnc` is installed as well, setup creates a VNC service with these security properties:
+
+- listens on `localhost` only;
+- no public TCP listener;
+- intended to be reached through an SSH tunnel;
+- exists only to let the owner complete browser authentication/challenges.
+
+Typical one-time login tunnel:
+
+```bash
+ssh -N -L 5901:127.0.0.1:5901 YOUR_USER@YOUR_SERVER
+```
+
+Then connect your VNC viewer to `localhost:5901` and log into Reddit normally in Chrome.
+
+If `Xvfb`/`x11vnc` are not installed, setup does not try to gain root privileges or install OS packages. It finishes the Publisher configuration and tells you that a private desktop is still needed.
+
+## Authentication boundary
+
+Passwords, 2FA, CAPTCHA, and consent are always completed manually in the owner-controlled browser. They are never requested by the MCP server, CLI, daemon, or AI agent.
+
+The normal browser profile remains the source of authentication. The project does not copy Reddit cookies to a central service and does not require users to hand account credentials to the project owner.
+
+## Manual portable local-CDP mode
+
+Advanced users can still start Chrome themselves:
 
 ```bash
 google-chrome \
@@ -20,35 +99,10 @@ export PUBLISHER_CDP_URL=http://127.0.0.1:9222
 npm start
 ```
 
-Remote CDP hosts are rejected. In this mode the publisher never stops the browser because its lifecycle belongs to you.
+Remote CDP hosts are rejected. In portable mode the publisher never stops the browser because its lifecycle belongs to you.
 
-## Managed browser mode
+## Manual managed-browser mode
 
-If `PUBLISHER_CDP_URL` is unset, the publisher can manage one persistent Chrome profile per account through a systemd user template named `reddit-agent-publisher-browser@.service` by default.
+If you do not use setup, the original managed-browser architecture is unchanged: `PUBLISHER_CDP_URL` is unset, and `ExternalChrome` starts a systemd user template named `reddit-agent-publisher-browser@.service` by default.
 
-The repository ships `bin/start-browser`, which creates a stable loopback CDP port for the selected account and starts Chrome at `about:blank`. A minimal user unit can call it like this:
-
-```ini
-[Unit]
-Description=Reddit Agent Publisher browser (%i)
-
-[Service]
-Type=simple
-Environment=PUBLISHER_STATE_DIR=%h/.local/share/reddit-agent-publisher
-ExecStart=/absolute/path/reddit-agent-publisher/bin/start-browser %i
-Restart=no
-```
-
-Install it as:
-
-```text
-~/.config/systemd/user/reddit-agent-publisher-browser@.service
-```
-
-Then run `systemctl --user daemon-reload`. The publisher starts the unit on demand, reuses the authenticated profile, pins Chrome while a live preview is waiting for approval, and stops idle managed Chrome after `browserIdleSeconds` (90 seconds by default).
-
-You can override the template prefix with `PUBLISHER_BROWSER_SERVICE_PREFIX`.
-
-## Authentication challenges
-
-Passwords, 2FA, CAPTCHA, and similar challenges are completed manually in the browser. If the browser lives on a headless server, expose its desktop only through an owner-controlled method such as a localhost-only VNC tunnel. Do not send credentials through the agent or publisher API.
+The repository ships `bin/start-browser`, which creates a persistent account profile and a stable loopback CDP port. The setup command simply automates creating the unit, state, key, configuration, and daemon around this existing mechanism.

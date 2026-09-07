@@ -6,8 +6,9 @@ import { Command } from "commander";
 import { createInterface } from "node:readline/promises";
 import { loadConfig } from "./config.js";
 import { rpc } from "./rpc.js";
+import { runSetup, type SetupClient, type SetupMode } from "./setup.js";
 
-const program = new Command().name("pubctl").description("Owner-approved Reddit publishing CLI").version("0.2.0");
+const program = new Command().name("reddit-agent-publisher").description("Owner-approved Reddit publishing CLI").version("0.2.0");
 const config = loadConfig();
 const out = (x: unknown) => { process.stdout.write(`${JSON.stringify(x, null, 2)}\n`); if ((x as any)?.ok === false) process.exitCode = 1; };
 const call = async (method: string, params: any = {}) => out(await rpc(config.socketPath, method, { ...params, actor: "cli" }));
@@ -43,6 +44,31 @@ function localChatFile(requested?: string): Array<Record<string, unknown>> | und
   const target=path.join(root,`${crypto.randomUUID()}${ext || ".bin"}`); fs.copyFileSync(source,target); fs.chmodSync(target,0o600); const body=fs.readFileSync(target);
   return [{path:target,name:path.basename(source),mime_type:mime[ext]??"application/octet-stream",size:body.length,sha256:`sha256:${crypto.createHash("sha256").update(body).digest("hex")}`}];
 }
+
+program.command("setup")
+  .description("Bootstrap a secure local/self-hosted install with Chrome, daemon services, and MCP config")
+  .option("--mode <mode>", "auto, desktop, or server", "auto")
+  .option("--client <client>", "codex, claude, opencode, or generic", "generic")
+  .option("--account <id>", "local browser profile id", "owner-main")
+  .option("--state-dir <path>", "override the local state directory")
+  .option("--no-systemd", "do not install systemd user services")
+  .option("--no-runtime-install", "do not create a stable runtime copy under the state directory")
+  .option("--non-interactive", "do not pause for browser login verification")
+  .action(async o => {
+    const modes = ["auto", "desktop", "server"];
+    const clients = ["codex", "claude", "opencode", "generic"];
+    if (!modes.includes(o.mode)) throw new Error(`Invalid setup mode: ${o.mode}`);
+    if (!clients.includes(o.client)) throw new Error(`Invalid MCP client: ${o.client}`);
+    await runSetup({
+      mode: o.mode as SetupMode,
+      client: o.client as SetupClient,
+      account: o.account,
+      stateDir: o.stateDir,
+      systemd: o.systemd,
+      runtimeInstall: o.runtimeInstall,
+      interactive: !o.nonInteractive,
+    });
+  });
 
 const prep = program.command("prepare").description("Create one encrypted draft; never publishes");
 prep.command("reddit-post")
