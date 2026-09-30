@@ -2,6 +2,11 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { Server as McpProtocolServer } from "@modelcontextprotocol/sdk/server/index.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import path from "node:path";
 import { z } from "zod";
 import { buildActionsOpenApi } from "./actions-schema.js";
@@ -15,6 +20,21 @@ const keyFile = process.env.PUBLISHER_ACTIONS_API_KEY_FILE;
 if (!keyFile || !fs.existsSync(keyFile)) throw new Error("PUBLISHER_ACTIONS_API_KEY_FILE must point to the systemd credential file");
 const apiKey = fs.readFileSync(keyFile, "utf8").trim();
 if (apiKey.length < 32) throw new Error("GPT Actions API key is unexpectedly short");
+
+const mcpUpstream = new Client({ name:"agent-publisher-actions-mcp-bridge", version:"0.1.0" }, { capabilities:{} });
+const mcpUpstreamTransport = new StdioClientTransport({
+  command:process.execPath,
+  args:[new URL("./mcp.js", import.meta.url).pathname],
+  cwd:process.cwd(),
+  env:Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string,string] => typeof entry[1] === "string")),
+  stderr:"inherit",
+});
+await mcpUpstream.connect(mcpUpstreamTransport);
+const mcpServer = new McpProtocolServer({ name:"agent-publisher", version:"0.2.0" }, { capabilities:{tools:{}} });
+mcpServer.setRequestHandler(ListToolsRequestSchema, request => mcpUpstream.listTools(request.params));
+mcpServer.setRequestHandler(CallToolRequestSchema, request => mcpUpstream.callTool(request.params));
+const mcpTransport = new StreamableHTTPServerTransport({ sessionIdGenerator:undefined, enableJsonResponse:true });
+await mcpServer.connect(mcpTransport);
 
 const rate = new Map<string, { started: number; count: number }>();
 const WINDOW_MS = 60_000;
@@ -235,6 +255,13 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   }
 
   if (req.method === "GET" && url.pathname === "/v1/files/download") { serveSignedArtifact(url,res); return; }
+
+  if (url.pathname === "/mcp") {
+    if (!authorized(req)) { res.setHeader("www-authenticate",'Bearer realm="agent-publisher"'); json(res,401,{ok:false,message:"Unauthorized."}); return; }
+    if (!allowRate(req)) { json(res,429,{ok:false,message:"Too many requests. Try again shortly."}); return; }
+    await mcpTransport.handleRequest(req,res);
+    return;
+  }
 
   if (!url.pathname.startsWith("/v1/")) { json(res,404,{ok:false,message:"Not found."}); return; }
   if (!authorized(req)) { res.setHeader("www-authenticate","Bearer"); json(res,401,{ok:false,message:"Unauthorized."}); return; }
