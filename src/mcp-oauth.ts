@@ -33,6 +33,7 @@ type ChatGptClientMetadata = {
   client_name?: unknown;
   redirect_uris?: unknown;
   token_endpoint_auth_method?: unknown;
+  token_endpoint_auth_methods_supported?: unknown;
 };
 
 function json(res: ServerResponse, status: number, value: unknown): void {
@@ -146,7 +147,10 @@ export class PublisherMcpOAuth {
     if (!response.ok) throw new Error("invalid_client_metadata");
     const metadata = await response.json() as ChatGptClientMetadata;
     if (metadata.client_id !== clientId || metadata.client_name !== "ChatGPT" || !Array.isArray(metadata.redirect_uris) || !metadata.redirect_uris.includes(redirectUri)) throw new Error("invalid_client_metadata");
-    if (metadata.token_endpoint_auth_method !== "none") throw new Error("unsupported_client_auth");
+    const supportedAuthMethods = Array.isArray(metadata.token_endpoint_auth_methods_supported)
+      ? metadata.token_endpoint_auth_methods_supported.filter((value): value is string => typeof value === "string")
+      : typeof metadata.token_endpoint_auth_method === "string" ? [metadata.token_endpoint_auth_method] : [];
+    if (!supportedAuthMethods.includes("none")) throw new Error("unsupported_client_auth");
     this.lockClient(clientId);
   }
 
