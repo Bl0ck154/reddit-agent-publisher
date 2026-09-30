@@ -13,6 +13,7 @@ import { buildActionsOpenApi } from "./actions-schema.js";
 import { loadConfig } from "./config.js";
 import { ActionFileError, prepareGptActionFiles, prepareGptActionImages } from "./gpt-action-files.js";
 import { rpc } from "./rpc.js";
+import { PublisherMcpOAuth } from "./mcp-oauth.js";
 import type { ResultEnvelope } from "./types.js";
 
 const config = loadConfig();
@@ -20,6 +21,7 @@ const keyFile = process.env.PUBLISHER_ACTIONS_API_KEY_FILE;
 if (!keyFile || !fs.existsSync(keyFile)) throw new Error("PUBLISHER_ACTIONS_API_KEY_FILE must point to the systemd credential file");
 const apiKey = fs.readFileSync(keyFile, "utf8").trim();
 if (apiKey.length < 32) throw new Error("GPT Actions API key is unexpectedly short");
+const mcpOAuth = new PublisherMcpOAuth(apiKey, config.stateDir);
 
 const mcpUpstream = new Client({ name:"agent-publisher-actions-mcp-bridge", version:"0.1.0" }, { capabilities:{} });
 const mcpUpstreamTransport = new StdioClientTransport({
@@ -31,7 +33,10 @@ const mcpUpstreamTransport = new StdioClientTransport({
 });
 await mcpUpstream.connect(mcpUpstreamTransport);
 const mcpServer = new McpProtocolServer({ name:"agent-publisher", version:"0.2.0" }, { capabilities:{tools:{}} });
-mcpServer.setRequestHandler(ListToolsRequestSchema, request => mcpUpstream.listTools(request.params));
+mcpServer.setRequestHandler(ListToolsRequestSchema, async request => {
+  const listed = await mcpUpstream.listTools(request.params);
+  return { ...listed, tools:listed.tools.map(tool=>({ ...tool, securitySchemes:[{type:"oauth2",scopes:["publisher"]}] } as any)) };
+});
 mcpServer.setRequestHandler(CallToolRequestSchema, request => mcpUpstream.callTool(request.params));
 const mcpTransport = new StreamableHTTPServerTransport({ sessionIdGenerator:undefined, enableJsonResponse:true });
 await mcpServer.connect(mcpTransport);
@@ -146,6 +151,14 @@ function authorized(req: IncomingMessage): boolean {
   return auth.startsWith("Bearer ") && safeEqual(auth.slice(7).trim(), apiKey);
 }
 
+function mcpAuthorized(req: IncomingMessage): boolean {
+  const auth = String(req.headers.authorization ?? "");
+  if (!auth.startsWith("Bearer ")) return false;
+  const token = auth.slice(7).trim();
+  if (safeEqual(token, apiKey)) return true;
+  return mcpOAuth.verifyAccessToken(token, `${publicBase(req)}/mcp`);
+}
+
 function clientId(req: IncomingMessage): string {
   const forwarded = String(req.headers["x-forwarded-for"] ?? "").split(",")[0].trim();
   return forwarded || req.socket.remoteAddress || "unknown";
@@ -247,6 +260,7 @@ async function prepareAndPublish(input: Record<string, unknown>): Promise<Record
 
 async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? "/", "http://gateway.local");
+  if (await mcpOAuth.handle(req,res,url,publicBase(req))) return;
 
   if (req.method === "GET" && url.pathname === "/health") { json(res,200,{ok:true,service:"reddit-agent-publisher-actions"},true); return; }
   if (req.method === "GET" && url.pathname === "/openapi.json") { json(res,200,buildActionsOpenApi(publicBase(req))); return; }
@@ -257,7 +271,10 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (req.method === "GET" && url.pathname === "/v1/files/download") { serveSignedArtifact(url,res); return; }
 
   if (url.pathname === "/mcp") {
-    if (!authorized(req)) { res.setHeader("www-authenticate",'Bearer realm="agent-publisher"'); json(res,401,{ok:false,message:"Unauthorized."}); return; }
+    if (!mcpAuthorized(req)) {
+      res.setHeader("www-authenticate",mcpOAuth.challenge(publicBase(req)));
+      json(res,401,{ok:false,message:"OAuth connection required."}); return;
+    }
     if (!allowRate(req)) { json(res,429,{ok:false,message:"Too many requests. Try again shortly."}); return; }
     await mcpTransport.handleRequest(req,res);
     return;
