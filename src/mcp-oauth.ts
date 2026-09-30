@@ -159,6 +159,8 @@ export class PublisherMcpOAuth {
   }
 
   async handle(req: IncomingMessage, res: ServerResponse, url: URL, baseUrl: string): Promise<boolean> {
+    const oauthPaths = new Set(["/.well-known/oauth-protected-resource","/.well-known/oauth-protected-resource/mcp","/.well-known/oauth-authorization-server","/oauth/authorize","/oauth/token"]);
+    if (!oauthPaths.has(url.pathname)) return false;
     const base = normalizeBase(baseUrl);
     const resource = `${base}/mcp`;
 
