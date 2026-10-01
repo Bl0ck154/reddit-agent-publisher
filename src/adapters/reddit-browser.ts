@@ -88,6 +88,10 @@ export function approvedCommentFieldAction(current: string | undefined, expected
   return "stale";
 }
 
+export function redditPreviewTargetScopeMustRemainVisible(action: Draft["action"]): boolean {
+  return action !== "create_post";
+}
+
 export function detectRedditTargetUnavailableText(text: string): string | undefined {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (/\bPage not found\b/i.test(normalized)) return "page_not_found";
@@ -752,7 +756,14 @@ export class RedditBrowserAdapter implements Adapter {
   }
 
   private async verifyForm(s: PreviewSession): Promise<void> {
-    if (!await s.targetScope.isVisible().catch(() => false)) throw new Error("APPROVAL_STALE: exact Reddit target is no longer visible");
+    // For an existing post/comment, targetScope is the exact content container and
+    // must stay visible. For create_post it is only Reddit's broad <main> shell;
+    // Shreddit may replace/hide that shell during SPA re-rendering while keeping
+    // the same submit URL and the already-bound form controls intact. Treating
+    // that cosmetic shell as the target caused false APPROVAL_STALE failures.
+    if (redditPreviewTargetScopeMustRemainVisible(s.action) && !await s.targetScope.isVisible().catch(() => false)) {
+      throw new Error("APPROVAL_STALE: exact Reddit target is no longer visible");
+    }
     if (s.titleField && await s.titleField.inputValue() !== s.title) throw new Error("APPROVAL_STALE: title changed after preview");
     if (s.bodyField && await this.fieldValue(s.bodyField) !== s.body) throw new Error("APPROVAL_STALE: body/comment changed after preview");
     if (s.linkField && await s.linkField.inputValue() !== s.outboundUrl) throw new Error("APPROVAL_STALE: outbound URL changed after preview");
