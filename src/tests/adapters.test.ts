@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { approvedCommentFieldAction, canonicalRedditPublishedPostUrl, detectRedditTargetUnavailableText, extractCommunityRulesText, formatSubredditRulesPayload, inferRedditBodyFormat, normalizeFlairOptions, redditCommentControlMatchesTarget, RedditBrowserAdapter, resolveRedditBodyFormat } from "../adapters/reddit-browser.js";
+import { approvedCommentFieldAction, canonicalRedditPublishedPostUrl, detectRedditTargetUnavailableText, extractCommunityRulesText, formatSubredditRulesPayload, inferRedditBodyFormat, normalizeFlairOptions, redditCommentControlMatchesTarget, redditPreviewTargetScopeMustRemainVisible, RedditBrowserAdapter, resolveRedditBodyFormat } from "../adapters/reddit-browser.js";
 import type { Config } from "../config.js";
 import type { Draft } from "../types.js";
 
@@ -177,3 +177,11 @@ test("Reddit approved reply restores a disappeared or reset composer without acc
   assert.equal(approvedCommentFieldAction(undefined,"approved body"),"restore");
   assert.equal(approvedCommentFieldAction("different body","approved body"),"stale");
 });
+
+test("Reddit create-post approval does not depend on Shreddit main-shell visibility",()=>{
+  assert.equal(redditPreviewTargetScopeMustRemainVisible("create_post"),false);
+  assert.equal(redditPreviewTargetScopeMustRemainVisible("create_comment"),true);
+  assert.equal(redditPreviewTargetScopeMustRemainVisible("edit"),true);
+  assert.equal(redditPreviewTargetScopeMustRemainVisible("delete"),true);
+});
+
