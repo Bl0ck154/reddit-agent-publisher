@@ -73,10 +73,43 @@ async function readForm(req: IncomingMessage): Promise<URLSearchParams> {
   return new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
 }
 
+type PasswordHashRecord = { version:number; algorithm:"scrypt"; n:number; r:number; p:number; salt:string; hash:string };
+const AUTH_FAIL_WINDOW_MS = 15 * 60_000;
+const AUTH_FAIL_MAX = 5;
+
+function loadPasswordHash(): PasswordHashRecord {
+  const file = String(process.env.MCP_OWNER_PASSWORD_HASH_FILE || "/opt/mcp-owner-auth-shared/password.json").trim();
+  if (!file) throw new Error("MCP_OWNER_PASSWORD_HASH_FILE is required");
+  const value = JSON.parse(fs.readFileSync(file, "utf8")) as PasswordHashRecord;
+  if (value.version !== 1 || value.algorithm !== "scrypt" || !value.salt || !value.hash || !Number.isInteger(value.n) || !Number.isInteger(value.r) || !Number.isInteger(value.p)) throw new Error("Invalid MCP owner password hash file");
+  return value;
+}
+
+function verifyPassword(password: string, record: PasswordHashRecord): boolean {
+  const expected = Buffer.from(record.hash, "hex");
+  const actual = crypto.scryptSync(password, Buffer.from(record.salt, "hex"), expected.length, { N:record.n, r:record.r, p:record.p, maxmem:64 * 1024 * 1024 });
+  return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+}
+
+function clientIp(req: IncomingMessage): string {
+  const forwarded = req.headers["x-forwarded-for"];
+  const raw = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+  return String(raw || req.socket.remoteAddress || "unknown").split(",")[0].trim().slice(0, 128);
+}
+
+function passwordPage(res: ServerResponse, status = 200, error = ""): void {
+  const message = error ? `<p style="color:#b42318">${error}</p>` : "";
+  const body = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Authorize Publisher</title></head><body style="font-family:system-ui;max-width:420px;margin:12vh auto;padding:24px"><h2>Authorize Publisher</h2>${message}<form method="post"><label>Password<br><input name="password" type="password" autocomplete="current-password" autofocus required style="width:100%;box-sizing:border-box;padding:10px;margin:8px 0 16px"></label><button type="submit" style="padding:10px 18px">Continue</button></form></body></html>`;
+  res.writeHead(status, { "content-type":"text/html; charset=utf-8", "content-length":Buffer.byteLength(body), "cache-control":"no-store", "content-security-policy":"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'", "x-content-type-options":"nosniff", "referrer-policy":"no-referrer" });
+  res.end(body);
+}
+
 export class PublisherMcpOAuth {
   private readonly secret: string;
   private readonly lockPath: string;
   private readonly codes = new Map<string, AuthorizationCode>();
+  private readonly passwordHash = loadPasswordHash();
+  private readonly passwordFailures = new Map<string, number[]>();
 
   constructor(secret: string, stateDir: string) {
     this.secret = secret;
@@ -188,7 +221,7 @@ export class PublisherMcpOAuth {
       return true;
     }
 
-    if (req.method === "GET" && url.pathname === "/oauth/authorize") {
+    if ((req.method === "GET" || req.method === "POST") && url.pathname === "/oauth/authorize") {
       const responseType = url.searchParams.get("response_type") ?? "";
       const clientId = url.searchParams.get("client_id") ?? "";
       const redirectUri = url.searchParams.get("redirect_uri") ?? "";
@@ -201,6 +234,26 @@ export class PublisherMcpOAuth {
         if (responseType !== "code" || challengeMethod !== "S256" || challenge.length < 43 || requestedResource !== resource) throw new Error("invalid_request");
         if (requestedScope.split(/\s+/).some(scope=>scope !== SCOPE)) throw new Error("invalid_scope");
         await this.validateChatGptClient(clientId, redirectUri);
+
+        if (req.method === "GET") { passwordPage(res); return true; }
+
+        const ip = clientIp(req);
+        const now = Date.now();
+        const failures = (this.passwordFailures.get(ip) || []).filter(ts => ts > now - AUTH_FAIL_WINDOW_MS);
+        if (failures.length >= AUTH_FAIL_MAX) {
+          this.passwordFailures.set(ip, failures);
+          passwordPage(res, 429, "Too many failed attempts. Try again later.");
+          return true;
+        }
+        const form = await readForm(req);
+        const password = form.get("password") || "";
+        if (!verifyPassword(password, this.passwordHash)) {
+          failures.push(now); this.passwordFailures.set(ip, failures);
+          passwordPage(res, 401, "Incorrect password.");
+          return true;
+        }
+        this.passwordFailures.delete(ip);
+
         const code = crypto.randomBytes(32).toString("base64url");
         this.codes.set(code,{clientId,redirectUri,codeChallenge:challenge,resource,scope:requestedScope,expiresAt:Date.now()+CODE_TTL_MS});
         const target = new URL(redirectUri); target.searchParams.set("code",code); if (state) target.searchParams.set("state",state);
