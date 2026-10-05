@@ -181,6 +181,123 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
+const MODERN_MCP_VERSION = "2026-07-28";
+const MCP_SECURITY_SCHEMES = [{ type:"oauth2", scopes:["publisher"] }] as const;
+
+type JsonRpcId = string | number | null;
+type JsonRpcRequestBody = { jsonrpc?: unknown; id?: JsonRpcId; method?: unknown; params?: unknown };
+
+function mcpJson(res: ServerResponse, status: number, value: unknown): void {
+  const body = JSON.stringify(value);
+  res.writeHead(status, {
+    "content-type":"application/json",
+    "content-length":Buffer.byteLength(body),
+    "cache-control":"no-store",
+    "x-content-type-options":"nosniff",
+  });
+  res.end(body);
+}
+
+function modernMcpError(res: ServerResponse, id: JsonRpcId | undefined, code: number, message: string, status = 400): void {
+  mcpJson(res,status,{jsonrpc:"2.0",id:id ?? null,error:{code,message}});
+}
+
+function modernToolDescriptor(tool: any): any {
+  const meta = tool?._meta && typeof tool._meta === "object" ? { ...tool._meta } : {};
+  return { ...tool, securitySchemes:MCP_SECURITY_SCHEMES, _meta:{ ...meta, securitySchemes:MCP_SECURITY_SCHEMES } };
+}
+
+async function handleModernMcp(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
+  const protocolVersion = String(req.headers["mcp-protocol-version"] ?? "");
+  const methodHeader = String(req.headers["mcp-method"] ?? "");
+  if (protocolVersion !== MODERN_MCP_VERSION && methodHeader !== "server/discover") return false;
+
+  if (req.method !== "POST") {
+    modernMcpError(res,undefined,-32600,"Modern MCP requests must use POST.",405);
+    return true;
+  }
+
+  let raw: unknown;
+  try { raw = await readJson(req); }
+  catch { modernMcpError(res,undefined,-32700,"Parse error."); return true; }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    modernMcpError(res,undefined,-32600,"Invalid Request."); return true;
+  }
+  const body = raw as JsonRpcRequestBody;
+  const id = body.id;
+  const method = typeof body.method === "string" ? body.method : "";
+  if (body.jsonrpc !== "2.0" || !method) {
+    modernMcpError(res,id,-32600,"Invalid Request."); return true;
+  }
+  if (methodHeader && methodHeader !== method) {
+    modernMcpError(res,id,-32020,"Mcp-Method header does not match JSON-RPC method."); return true;
+  }
+  if (method !== "server/discover" && protocolVersion !== MODERN_MCP_VERSION) {
+    modernMcpError(res,id,-32022,`Unsupported protocol version: ${protocolVersion || "missing"}.`); return true;
+  }
+
+  const params = body.params && typeof body.params === "object" && !Array.isArray(body.params)
+    ? body.params as Record<string,unknown>
+    : {};
+
+  try {
+    if (method === "server/discover") {
+      mcpJson(res,200,{
+        jsonrpc:"2.0", id,
+        result:{
+          resultType:"complete",
+          supportedVersions:[MODERN_MCP_VERSION],
+          capabilities:{tools:{}},
+          _meta:{"io.modelcontextprotocol/serverInfo":{name:"agent-publisher",version:"0.2.0"}},
+          instructions:"Private owner-controlled publishing tools for Reddit and Google Maps. Read tools are safe to call directly; publishing tools use the server's existing preview/approval safeguards.",
+          ttlMs:300000,
+          cacheScope:"private",
+        },
+      });
+      return true;
+    }
+
+    if (method === "tools/list") {
+      const cursor = typeof params.cursor === "string" ? params.cursor : undefined;
+      const listed = await mcpUpstream.listTools(cursor ? { cursor } : undefined);
+      mcpJson(res,200,{
+        jsonrpc:"2.0", id,
+        result:{
+          resultType:"complete",
+          tools:listed.tools.map(modernToolDescriptor),
+          ...(listed.nextCursor ? {nextCursor:listed.nextCursor} : {}),
+          ttlMs:300000,
+          cacheScope:"private",
+        },
+      });
+      return true;
+    }
+
+    if (method === "tools/call") {
+      const name = typeof params.name === "string" ? params.name : "";
+      const nameHeader = String(req.headers["mcp-name"] ?? "");
+      if (!name) { modernMcpError(res,id,-32602,"Tool name is required."); return true; }
+      if (nameHeader && nameHeader !== name) {
+        modernMcpError(res,id,-32020,"Mcp-Name header does not match tool name."); return true;
+      }
+      const args = params.arguments && typeof params.arguments === "object" && !Array.isArray(params.arguments)
+        ? params.arguments as Record<string,unknown>
+        : {};
+      const result = await mcpUpstream.callTool({name,arguments:args});
+      mcpJson(res,200,{jsonrpc:"2.0",id,result:{resultType:"complete",...result}});
+      return true;
+    }
+
+    modernMcpError(res,id,-32601,`Method not found: ${method}.`);
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("modern MCP dispatch error", {method,tool:typeof params.name === "string" ? params.name : undefined,message});
+    modernMcpError(res,id,-32603,message,500);
+    return true;
+  }
+}
+
 function errorMessage(env: ResultEnvelope): string {
   const code = env.error?.code ?? "UNKNOWN_ERROR";
   if (["AUTH_REQUIRED","TAKEOVER_REQUIRED"].includes(code)) return "The saved browser session needs a manual sign-in or verification on the server before this can continue.";
@@ -276,6 +393,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       json(res,401,{ok:false,message:"OAuth connection required."}); return;
     }
     if (!allowRate(req)) { json(res,429,{ok:false,message:"Too many requests. Try again shortly."}); return; }
+    if (await handleModernMcp(req,res)) return;
     await mcpTransport.handleRequest(req,res);
     return;
   }
