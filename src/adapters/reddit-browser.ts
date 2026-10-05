@@ -14,11 +14,14 @@ import { classifyRedditNotification, evaluateRedditEligibility, extractRedditEli
 type Role = "button" | "menuitem" | "link" | "combobox" | "tab";
 type MediaFile = { path: string; name: string; mime_type: string; size: number; sha256: string };
 type TargetIdentity = { subreddit: string; postId: string; commentId?: string; fullname: string; permalink: string };
+type RedditVoteDirection = "up" | "down";
+type RedditVoteState = RedditVoteDirection | "none" | "unknown";
 type PreviewSession = {
   page: Page; action: Draft["action"]; pageUrl: string; targetIdentity: string; targetScope: Locator;
   submit?: Locator; deleteControl?: Locator; titleField?: Locator; bodyField?: Locator; linkField?: Locator;
   title?: string; body?: string; outboundUrl?: string; flair?: string; flairControl?: Locator;
   mediaScope?: Locator;
+  voteDirection?: RedditVoteDirection; voteStateBefore?: RedditVoteState;
 };
 type CacheEntry = { value: Record<string, unknown>; storedAt: number; expiresAt: number };
 type LeanState = { enabled: boolean };
@@ -90,6 +93,12 @@ export function approvedCommentFieldAction(current: string | undefined, expected
 
 export function redditPreviewTargetScopeMustRemainVisible(action: Draft["action"]): boolean {
   return action !== "create_post";
+}
+
+export function redditVoteDirection(value: unknown): RedditVoteDirection {
+  const direction = String(value ?? "").trim().toLowerCase();
+  if (direction === "up" || direction === "down") return direction;
+  throw new PublisherError("REDDIT_VOTE_INVALID", "Reddit vote direction must be up or down.");
 }
 
 export function detectRedditTargetUnavailableText(text: string): string | undefined {
@@ -174,6 +183,8 @@ const ui = {
   more: [/open user actions/i, /more options/i, /more actions/i, /overflow/i, /додаткові дії/i, /інші параметри/i, /другие действия/i, /ещё/i],
   flair: [/add flair/i, /post flair/i, /^flair$/i, /додати flair/i, /выбрать flair/i],
   markdown: [/^markdown editor$/i, /^markdown mode$/i, /switch to markdown/i, /use markdown/i, /редактор markdown/i, /режим markdown/i],
+  upvote: [/^upvote$/i, /remove upvote/i, /скасувати апвоут/i, /апвоут/i],
+  downvote: [/^downvote$/i, /remove downvote/i, /скасувати даунвоут/i, /даунвоут/i],
 };
 
 export class RedditBrowserAdapter implements Adapter {
@@ -198,6 +209,7 @@ export class RedditBrowserAdapter implements Adapter {
     } else if (d.action === "create_comment") {
       if (!d.target.url || !String(d.content.body ?? "").trim()) throw new Error("An exact Reddit permalink and body are required");
       this.permalink(String(d.target.url));
+      if (d.content.vote !== undefined) redditVoteDirection(d.content.vote);
     } else if (d.action === "send_chat_message") {
       const roomId = d.target.room_id === undefined ? "" : String(d.target.room_id);
       const recipient = d.target.recipient_username === undefined ? "" : String(d.target.recipient_username).trim();
@@ -212,6 +224,10 @@ export class RedditBrowserAdapter implements Adapter {
       if (!d.target.url) throw new Error("An exact Reddit publication permalink is required for edit/delete");
       this.permalink(String(d.target.url));
       if (d.action === "edit" && !String(d.content.body ?? "").trim()) throw new Error("body is required for edit");
+    } else if (d.action === "vote") {
+      if (!d.target.url) throw new Error("An exact Reddit post/comment permalink is required for voting");
+      this.permalink(String(d.target.url));
+      redditVoteDirection(d.content.direction);
     } else throw new Error(`Unsupported Reddit action: ${d.action}`);
     if (d.content.body_format !== undefined) this.bodyFormat(d);
   }
@@ -525,13 +541,19 @@ export class RedditBrowserAdapter implements Adapter {
       let session: PreviewSession;
       if (d.action === "create_post") session = await this.previewPost(page, d);
       else if (d.action === "create_comment") session = await this.previewComment(page, d);
+      else if (d.action === "vote") session = await this.previewVote(page, d);
       else session = await this.previewOwnMutation(page, d);
       const artifact = await this.shot(page, d.id);
       this.rememberPreview(d, session);
       const content = d.action === "delete" ? {} : { ...d.content };
       if (Array.isArray(content.media_files)) content.media_files = (content.media_files as MediaFile[]).map(file=>({name:file.name,mime_type:file.mime_type,size:file.size,sha256:file.sha256}));
+      const notice = d.action === "vote"
+        ? `The exact Reddit target and ${session.voteDirection}vote control are verified. No vote was clicked.`
+        : d.action === "create_comment" && session.voteDirection
+          ? `The exact Reddit comment form and ${session.voteDirection}vote control are verified. The comment was not submitted and no vote was clicked.`
+          : "The exact Reddit form is ready; no Post/Comment/Save/Delete action was clicked.";
       return { summary: { backend: "browser", action: d.action, account: d.account, target: d.target, target_identity: session.targetIdentity,
-        content, current_url: page.url(), preflight, notice: "The exact Reddit form is ready; no Post/Comment/Save/Delete action was clicked." }, artifact_path: artifact, warnings: preflightWarnings };
+        content, ...(session.voteDirection ? {vote:{direction:session.voteDirection,current_state:session.voteStateBefore}} : {}), current_url: page.url(), preflight, notice }, artifact_path: artifact, warnings: preflightWarnings };
     } finally {
       this.chrome.release(d.account);
     }
@@ -563,6 +585,11 @@ export class RedditBrowserAdapter implements Adapter {
       if (d.action === "create_comment") await this.rebindCommentSession(d, s);
       await this.verifyForm(s);
       const before = s.page.url();
+      if (d.action === "vote") {
+        const effect = await this.applyVote(s.targetScope, s.targetIdentity, redditVoteDirection(d.content.direction));
+        const warnings = effect.verified ? [] : ["Reddit vote control was clicked, but the resulting vote state could not be conclusively verified from the current UI."];
+        return { status:"PUBLISHED", url:String(d.target.url), performed:effect.applied, effects:{vote:effect}, warnings };
+      }
       if (d.action === "delete") {
         if (!s.deleteControl || !await s.deleteControl.isVisible()) throw new Error("APPROVAL_STALE: exact Delete control disappeared");
         await s.deleteControl.click();
@@ -583,6 +610,19 @@ export class RedditBrowserAdapter implements Adapter {
           return { status: "PUBLISHED", warnings: ["Reddit published the post, but the browser did not expose a canonical post permalink. The non-canonical browser URL was intentionally not returned."] };
         }
         return { status: "PUBLISHED", external_id: canonical.fullname, url: canonical.url, warnings: [] };
+      }
+      if (d.action === "create_comment" && d.content.vote !== undefined) {
+        const direction = redditVoteDirection(d.content.vote);
+        try {
+          const id = this.permalink(String(d.target.url));
+          const scope = await this.targetScope(s.page, id);
+          const effect = await this.applyVote(scope, id.fullname, direction);
+          const warnings = effect.verified ? [] : [`The comment was published and the ${direction}vote control was clicked, but the resulting vote state could not be conclusively verified.`];
+          return { status:"PUBLISHED", url:s.page.url(), warnings, effects:{vote:effect} };
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return { status:"PUBLISHED", url:s.page.url(), warnings:[`The comment was published, but the requested ${direction}vote could not be applied: ${message.slice(0,220)}`], effects:{vote:{direction,applied:false,verified:false,error:message.slice(0,220)}} };
+        }
       }
       return { status: "PUBLISHED", url: s.page.url(), warnings: [] };
     } finally {
@@ -687,7 +727,10 @@ export class RedditBrowserAdapter implements Adapter {
     }
     bodyField = await this.fillRedditBody(bodyScope, bodyField, String(d.content.body), this.bodyFormat(d));
     const submit = await this.commentSubmit(bodyScope);
-    return { page, action: d.action, pageUrl: page.url(), targetIdentity: id.fullname, targetScope: scope, submit, bodyField, body: String(d.content.body) };
+    const voteDirection = d.content.vote === undefined ? undefined : redditVoteDirection(d.content.vote);
+    const voteStateBefore = voteDirection ? await this.voteState(scope, id.fullname) : undefined;
+    if (voteDirection) await this.voteControl(scope, id.fullname, voteDirection);
+    return { page, action: d.action, pageUrl: page.url(), targetIdentity: id.fullname, targetScope: scope, submit, bodyField, body: String(d.content.body), voteDirection, voteStateBefore };
   }
 
   private async previewOwnMutation(page: Page, d: Draft): Promise<PreviewSession> {
@@ -710,6 +753,20 @@ export class RedditBrowserAdapter implements Adapter {
     const form = await this.formFor(page, bodyField);
     const submit = await this.needUniqueAny(form, ["button"], ui.save);
     return { page, action: d.action, pageUrl: page.url(), targetIdentity: id.fullname, targetScope: scope, submit, bodyField, body: String(d.content.body) };
+  }
+
+  private async previewVote(page: Page, d: Draft): Promise<PreviewSession> {
+    const id = this.permalink(String(d.target.url));
+    const direction = redditVoteDirection(d.content.direction);
+    await this.gotoRetry(page, id.permalink);
+    this.assertOrigin(page.url());
+    await this.requireAuth(page);
+    this.assertSameTarget(page.url(), id);
+    await this.requireTargetAvailable(page, id);
+    const scope = await this.targetScope(page, id);
+    await this.voteControl(scope, id.fullname, direction);
+    const state = await this.voteState(scope, id.fullname);
+    return { page, action:d.action, pageUrl:page.url(), targetIdentity:id.fullname, targetScope:scope, voteDirection:direction, voteStateBefore:state };
   }
 
   private async rebindCommentSession(d: Draft, s: PreviewSession): Promise<void> {
@@ -769,6 +826,74 @@ export class RedditBrowserAdapter implements Adapter {
     if (s.linkField && await s.linkField.inputValue() !== s.outboundUrl) throw new Error("APPROVAL_STALE: outbound URL changed after preview");
     if (s.mediaScope && (!await s.mediaScope.isVisible().catch(()=>false) || !await s.mediaScope.getByRole("button",{name:/remove media/i}).isVisible().catch(()=>false))) throw new Error("APPROVAL_STALE: selected Reddit images disappeared after preview");
     if (s.flair && !s.flairControl) throw new Error("APPROVAL_STALE: flair control disappeared after preview");
+  }
+
+  private async voteControl(scope: Locator, fullname: string, direction: RedditVoteDirection): Promise<Locator> {
+    const token = direction === "up" ? "upvote" : "downvote";
+    const css = `button[${token}],button[aria-label*="${token}" i],button[title*="${token}" i],button[data-testid*="${token}" i],[role="button"][aria-label*="${token}" i]`;
+    const candidates = scope.locator(css);
+    const matches: Locator[] = [];
+    for (let i = 0; i < await candidates.count(); i += 1) {
+      const item = candidates.nth(i);
+      if (!await item.isVisible().catch(() => false)) continue;
+      const direct = await item.evaluate((element, expected) => {
+        let current: Element | null = element;
+        for (let depth = 0; current && depth < 20; depth += 1) {
+          if (current.matches("shreddit-comment,shreddit-post,[data-fullname]")) {
+            const identity = current.getAttribute("thingid") || current.getAttribute("id") || current.getAttribute("data-fullname");
+            return identity === expected;
+          }
+          const root = current.getRootNode();
+          current = current.parentElement || (root instanceof ShadowRoot ? root.host : null);
+        }
+        return false;
+      }, fullname).catch(() => false);
+      if (direct) matches.push(item);
+    }
+    if (matches.length === 1) return matches[0];
+    if (matches.length > 1) throw new Error(`AMBIGUOUS_TARGET: multiple direct ${token} controls for ${fullname}`);
+    const fallback = await this.findAny(scope, ["button"], direction === "up" ? ui.upvote : ui.downvote);
+    if (fallback) return fallback;
+    throw new Error(`SITE_CHANGED: exact ${token} control for ${fullname} was not found`);
+  }
+
+  private async voteControlState(control: Locator, direction: RedditVoteDirection): Promise<"active"|"inactive"|"unknown"> {
+    const ariaPressed = (await control.getAttribute("aria-pressed").catch(() => null))?.toLowerCase();
+    if (ariaPressed === "true") return "active";
+    if (ariaPressed === "false") return "inactive";
+    const ariaLabel = (await control.getAttribute("aria-label").catch(() => null) ?? "").toLowerCase();
+    if (ariaLabel.includes(`remove ${direction}vote`)) return "active";
+    const state = (await control.getAttribute("data-state").catch(() => null) ?? "").toLowerCase();
+    if (["active","on","selected","checked",`${direction}voted`].includes(state)) return "active";
+    if (["inactive","off","unselected","unchecked"].includes(state)) return "inactive";
+    const selected = (await control.getAttribute("data-selected").catch(() => null) ?? "").toLowerCase();
+    if (selected === "true") return "active";
+    if (selected === "false") return "inactive";
+    const cls = (await control.getAttribute("class").catch(() => null) ?? "").toLowerCase();
+    if (direction === "up" && /(?:text|bg)-action-upvote|\bupvoted\b/.test(cls)) return "active";
+    if (direction === "down" && /(?:text|bg)-action-downvote|\bdownvoted\b/.test(cls)) return "active";
+    return "unknown";
+  }
+
+  private async voteState(scope: Locator, fullname: string): Promise<RedditVoteState> {
+    const up = await this.voteControl(scope, fullname, "up");
+    const down = await this.voteControl(scope, fullname, "down");
+    const upState = await this.voteControlState(up, "up");
+    const downState = await this.voteControlState(down, "down");
+    if (upState === "active" && downState !== "active") return "up";
+    if (downState === "active" && upState !== "active") return "down";
+    if (upState === "inactive" && downState === "inactive") return "none";
+    return "unknown";
+  }
+
+  private async applyVote(scope: Locator, fullname: string, direction: RedditVoteDirection): Promise<Record<string, unknown> & {applied:boolean;verified:boolean}> {
+    const before = await this.voteState(scope, fullname);
+    if (before === direction) return {direction,before,after:before,applied:false,already_set:true,verified:true};
+    const control = await this.voteControl(scope, fullname, direction);
+    await control.click();
+    await scope.page().waitForTimeout(450);
+    const after = await this.voteState(scope, fullname);
+    return {direction,before,after,applied:true,already_set:false,verified:after === direction};
   }
 
   private async openOwnActions(scope: Locator, action: Draft["action"]): Promise<void> {

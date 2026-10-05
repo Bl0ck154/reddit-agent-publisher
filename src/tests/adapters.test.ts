@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { approvedCommentFieldAction, canonicalRedditPublishedPostUrl, detectRedditTargetUnavailableText, extractCommunityRulesText, formatSubredditRulesPayload, inferRedditBodyFormat, normalizeFlairOptions, redditCommentControlMatchesTarget, redditPreviewTargetScopeMustRemainVisible, RedditBrowserAdapter, resolveRedditBodyFormat } from "../adapters/reddit-browser.js";
+import { approvedCommentFieldAction, canonicalRedditPublishedPostUrl, detectRedditTargetUnavailableText, extractCommunityRulesText, formatSubredditRulesPayload, inferRedditBodyFormat, normalizeFlairOptions, redditCommentControlMatchesTarget, redditPreviewTargetScopeMustRemainVisible, redditVoteDirection, RedditBrowserAdapter, resolveRedditBodyFormat } from "../adapters/reddit-browser.js";
 import type { Config } from "../config.js";
 import type { Draft } from "../types.js";
 
@@ -56,6 +56,16 @@ test("Reddit browser adapter rejects look-alike URLs",async()=>{
 test("Reddit browser adapter accepts canonical comment permalink",async()=>{
   const a=new RedditBrowserAdapter(config);
   await a.validate({...base,action:"create_comment",target:{url:"https://www.reddit.com/r/example/comments/abc123/title/def456/"},content:{body:"Owner reply"}} as Draft);
+});
+test("Reddit browser adapter accepts standalone and comment-bundled votes",async()=>{
+  const a=new RedditBrowserAdapter(config);
+  await a.validate({...base,action:"vote",target:{url:"https://www.reddit.com/r/example/comments/abc123/title/def456/"},content:{direction:"up"}} as Draft);
+  await a.validate({...base,action:"create_comment",target:{url:"https://www.reddit.com/r/example/comments/abc123/title/"},content:{body:"I agree",vote:"up"}} as Draft);
+});
+test("Reddit vote direction is strict",()=>{
+  assert.equal(redditVoteDirection("up"),"up");
+  assert.equal(redditVoteDirection("DOWN"),"down");
+  assert.throws(()=>redditVoteDirection("like"),/up or down/);
 });
 test("Reddit browser adapter validates an exact Reddit Chat room reply",async()=>{
   const a=new RedditBrowserAdapter(config); await a.validate({...base,action:"send_chat_message",target:{room_id:"!room123:reddit.com"},content:{body:"Owner DM reply"}} as Draft);

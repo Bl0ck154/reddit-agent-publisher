@@ -12,6 +12,10 @@ export interface PublishData {
   url?: string;
   status: string;
   warnings?: string[];
+  /** False when the requested state was already present and no new mutation was needed. */
+  performed?: boolean;
+  /** Structured secondary effects, e.g. an upvote bundled with a comment publish. */
+  effects?: Record<string, unknown>;
   /** Internal alias used to deduplicate an equivalent retry that reaches the same mutation through a different target form. */
   idempotency_alias_target?: string;
 }

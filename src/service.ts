@@ -171,7 +171,7 @@ export class PublisherService {
       this.store.audit("publication.published", actor, id, { external_id: r.external_id, url: r.url, retry_intent_reused:intent?.reused ?? false });
       this.lastMutation.set(lock, Date.now());
       return envelope({ state: "PUBLISHED", adapter: d.adapter, account: d.account, draft_id: id, revision: d.revision,
-        side_effect: { performed: true }, result: r, warnings: r.warnings ?? [] });
+        side_effect: { performed: r.performed ?? true }, result: r, warnings: r.warnings ?? [] });
     } catch (e: any) { const current=this.store.getDraft(id); if(current?.state==="PUBLISHING") this.store.updateState(id,isFinalPublishFailure(String(e.message))?"FAILED_FINAL":"FAILED_RETRYABLE"); this.store.audit("publication.failed", actor, id, { error: String(e.message).slice(0, 300) }); return this.fail(e, id); }
     finally { this.locks.delete(lock); }
   }
