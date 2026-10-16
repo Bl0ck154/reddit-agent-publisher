@@ -2,6 +2,12 @@
 
 Use these rules whenever drafting or rewriting Reddit posts and comments for the owner.
 
+## Required humanizer check
+
+Before presenting or previewing any agent-written or materially revised Reddit post or comment, apply [blader/humanizer](https://github.com/blader/humanizer/blob/main/SKILL.md). On the production server read `/opt/agent-skills/humanizer/SKILL.md`; elsewhere use an installed copy or the upstream skill. Read it as an editing process, not a list of buzzwords to avoid. Run the final check for canned AI contrasts, theatrical closers, repetitive paragraph rhythm, over-polished structure and factual drift.
+
+Keep the owner's frustration, opinion and colloquial exaggeration when it is visibly subjective, but never convert a known timeline into a false objective claim or invent events, evidence or third-party wrongdoing. The user's verbatim final copy stays unchanged unless editing was requested.
+
 ## Default voice
 
 Write like a normal Reddit user, not like an assistant, marketer, support agent, or polished article writer.
