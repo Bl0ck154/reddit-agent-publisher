@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { approvedCommentFieldAction, canonicalRedditPublishedPostUrl, detectRedditTargetUnavailableText, extractCommunityRulesText, formatSubredditRulesPayload, inferRedditBodyFormat, normalizeFlairOptions, redditCommentControlMatchesTarget, redditPreviewTargetScopeMustRemainVisible, redditVoteDirection, RedditBrowserAdapter, redditMediaFilesMatch, redditReadBackendOrder, classifyRedditPostVisibility, classifyRedditListingModeration, resolveRedditBodyFormat } from "../adapters/reddit-browser.js";
+import { approvedCommentFieldAction, canonicalRedditPublishedPostUrl, detectRedditTargetUnavailableText, extractCommunityRulesText, formatSubredditRulesPayload, inferRedditBodyFormat, normalizeFlairOptions, redditCommentControlMatchesTarget, redditPreviewTargetScopeMustRemainVisible, redditVoteDirection, RedditBrowserAdapter, redditMediaFilesMatch, redditReadBackendOrder, classifyRedditPostVisibility, classifyRedditListingModeration, redditPostListingPath, resolveRedditBodyFormat } from "../adapters/reddit-browser.js";
 import type { Config } from "../config.js";
 import type { Draft } from "../types.js";
 
@@ -226,4 +226,10 @@ test("Reddit listing moderation is identity-bound and accepts only explicit remo
   assert.equal(classifyRedditListingModeration(listing("t3_abc","automod_filtered"),"t3_abc").status,"PENDING_REVIEW");
   assert.equal(classifyRedditListingModeration(listing("t3_abc",null),"t3_abc").status,"UNKNOWN");
   assert.equal(classifyRedditListingModeration(listing("t3_other","moderator"),"t3_abc").status,"UNKNOWN");
+});
+
+test("moderation reads exact JSON listing endpoint rather than HTML post URL",()=>{
+  assert.equal(redditPostListingPath("openrouter","1xlg2l7"),
+    "/r/openrouter/comments/1xlg2l7.json?raw_json=1&limit=1&depth=0");
+  assert.throws(()=>redditPostListingPath("invalid/slash","1xlg2l7"));
 });
