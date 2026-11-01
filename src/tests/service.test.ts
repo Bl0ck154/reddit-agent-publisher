@@ -168,3 +168,22 @@ test("account cooldown is absorbed internally for back-to-back mutations", async
   assert.equal(second.error?.code, undefined);
   assert.equal(adapter.published, 2);
 });
+
+test("publication status keeps delivery and moderation outcomes separate, without reposting",async()=>{
+  const {publisher,adapter}=makePublisher();
+  const prepared=await prepareAndPreview(publisher,"moderation");
+  const token=await approve(publisher,prepared.id,prepared.digest);
+  const posted=await publisher.publish(prepared.id,token);
+  assert.equal(posted.ok,true);
+  (adapter as any).publicationVisibility=async()=>({status:"REMOVED",reason:"explicit_removal_notice",checked_at:"2026-11-01T22:00:00Z"});
+  const checked=await publisher.publicationStatus(prepared.id);
+  assert.equal(checked.ok,true);
+  assert.equal((checked.result as any).published,true);
+  assert.equal((checked.result as any).visibility_status,"REMOVED");
+  assert.equal((checked.result as any).public_visibility_verified,false);
+  assert.equal(adapter.published,1);
+  const row=publisher.store.db.prepare("SELECT v.status AS visibility_status,v.reason AS visibility_reason FROM publication_visibility v JOIN publications p ON p.id=v.publication_id WHERE p.draft_id=?").get(prepared.id) as any;
+  assert.equal(row.visibility_status,"REMOVED");
+  assert.equal(row.visibility_reason,"explicit_removal_notice");
+  publisher.store.db.close();
+});

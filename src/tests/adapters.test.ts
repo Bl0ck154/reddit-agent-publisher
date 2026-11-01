@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { approvedCommentFieldAction, canonicalRedditPublishedPostUrl, detectRedditTargetUnavailableText, extractCommunityRulesText, formatSubredditRulesPayload, inferRedditBodyFormat, normalizeFlairOptions, redditCommentControlMatchesTarget, redditPreviewTargetScopeMustRemainVisible, redditVoteDirection, RedditBrowserAdapter, resolveRedditBodyFormat } from "../adapters/reddit-browser.js";
+import { approvedCommentFieldAction, canonicalRedditPublishedPostUrl, detectRedditTargetUnavailableText, extractCommunityRulesText, formatSubredditRulesPayload, inferRedditBodyFormat, normalizeFlairOptions, redditCommentControlMatchesTarget, redditPreviewTargetScopeMustRemainVisible, redditVoteDirection, RedditBrowserAdapter, redditMediaFilesMatch, redditReadBackendOrder, classifyRedditPostVisibility, resolveRedditBodyFormat } from "../adapters/reddit-browser.js";
 import type { Config } from "../config.js";
 import type { Draft } from "../types.js";
 
@@ -195,3 +195,27 @@ test("Reddit create-post approval does not depend on Shreddit main-shell visibil
   assert.equal(redditPreviewTargetScopeMustRemainVisible("delete"),true);
 });
 
+
+test("image selection verifies count, order and exact browser filenames/sizes",()=>{
+  const expected=[{name:"a.png",size:100},{name:"b.jpg",size:200}];
+  assert.equal(redditMediaFilesMatch(expected,expected),true);
+  assert.equal(redditMediaFilesMatch(expected,[expected[0]]),false);
+  assert.equal(redditMediaFilesMatch(expected,[expected[1],expected[0]]),false);
+  assert.equal(redditMediaFilesMatch(expected,[{name:"a.png",size:99},expected[1]]),false);
+  assert.equal(redditMediaFilesMatch([],[]),false);
+});
+
+test("moderation status never mistakes author visibility for public visibility",()=>{
+  assert.deepEqual(classifyRedditPostVisibility("Sorry, this post was removed by Reddit's filters.",true),{status:"REMOVED",reason:"explicit_removal_notice"});
+  assert.deepEqual(classifyRedditPostVisibility("This post has been removed by the moderators",true),{status:"REMOVED",reason:"explicit_removal_notice"});
+  assert.equal(classifyRedditPostVisibility("Your post is pending moderator approval",true).status,"PENDING_REVIEW");
+  assert.equal(classifyRedditPostVisibility("Post title and body",true).status,"VISIBLE_TO_AUTHOR");
+  assert.equal(classifyRedditPostVisibility("",false).status,"UNKNOWN");
+});
+
+test("read backends fall back to other authenticated browser before Chrome; writes stay Chrome",()=>{
+  assert.deepEqual(redditReadBackendOrder("obscura",true,true),["obscura","lightpanda","chrome"]);
+  assert.deepEqual(redditReadBackendOrder("lightpanda",true,true),["lightpanda","obscura","chrome"]);
+  assert.deepEqual(redditReadBackendOrder("lightpanda",false,false),["chrome"]);
+  assert.deepEqual(redditReadBackendOrder("chrome",true,true),["chrome"]);
+});
