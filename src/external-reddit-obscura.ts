@@ -9,6 +9,7 @@ const REDDIT_AUTH_COOKIES = new Set(["reddit_session", "token_v2"]);
 
 type ObscuraSession = {
   browser?: Browser;
+  context?: BrowserContext;
   connecting?: Promise<Browser>;
   active: number;
   idleTimer?: ReturnType<typeof setTimeout>;
@@ -37,7 +38,7 @@ export function hasRedditAuthCookie(cookies: Array<Pick<Cookie, "name" | "domain
 export class ExternalRedditObscura {
   private static sessions = new Map<string, ObscuraSession>();
 
-  constructor(private config: Config) {}
+  constructor(private config: Config, private mode: "obscura" | "lightpanda" = "obscura") {}
 
   async page(account: string): Promise<Page> {
     const target = this.target(account);
@@ -48,7 +49,7 @@ export class ExternalRedditObscura {
 
     try {
       const browser = await this.browser(target, session);
-      const context = browser.contexts()[0];
+      const context = session.context ?? browser.contexts()[0];
       if (!context) throw new Error("OBSCURA_START_FAILED: CDP endpoint has no default browser context");
       await this.restoreAuth(target, session, context);
 
@@ -80,7 +81,7 @@ export class ExternalRedditObscura {
     const session = ExternalRedditObscura.sessions.get(target.instance);
     if (!session) return;
     try {
-      const context = session.browser?.isConnected() ? session.browser.contexts()[0] : undefined;
+      const context = session.browser?.isConnected() ? session.context ?? session.browser.contexts()[0] : undefined;
       if (context) await this.persistAuth(target, context);
     } catch {
       // Keep the last valid encrypted snapshot if Reddit rotates state unexpectedly.
@@ -122,7 +123,7 @@ export class ExternalRedditObscura {
     this.writeAuth(target.authFile, redditCookies);
 
     const session = ExternalRedditObscura.sessions.get(target.instance);
-    const context = session?.browser?.isConnected() ? session.browser.contexts()[0] : undefined;
+    const context = session?.browser?.isConnected() ? session.context ?? session.browser.contexts()[0] : undefined;
     if (context) {
       await context.addCookies(this.toSetCookies(redditCookies));
       session!.authImported = true;
@@ -137,19 +138,19 @@ export class ExternalRedditObscura {
   private target(account: string): ObscuraTarget {
     const shared = account === "owner-main" || account === "reddit-main" || account === "default";
     const safe = shared ? "owner-main" : account.replace(/[^a-z0-9_-]/gi, "_");
-    const storageDir = path.join(this.config.stateDir, "obscura", "reddit", safe);
-    const authDir = path.join(this.config.stateDir, "auth", "reddit");
+    const storageDir = path.join(this.config.stateDir, this.mode, "reddit", safe);
+    const authDir = this.mode === "lightpanda" ? path.join(this.config.stateDir, "auth", "lightpanda") : path.join(this.config.stateDir, "auth", "reddit");
     fs.mkdirSync(storageDir, { recursive: true, mode: 0o700 });
     fs.mkdirSync(authDir, { recursive: true, mode: 0o700 });
     fs.chmodSync(storageDir, 0o700);
     fs.chmodSync(authDir, 0o700);
-    const instance = `reddit__${safe}`;
+    const instance = `${this.mode}__reddit__${safe}`;
     const checksum = Buffer.from(instance).reduce((sum, byte) => (sum + byte) >>> 0, 0);
     return {
       instance,
       storageDir,
       authFile: path.join(authDir, `${safe}.cookies.enc`),
-      port: 11300 + (checksum % 500),
+      port: (this.mode === "lightpanda" ? 12300 : 11300) + (checksum % 500),
     };
   }
 
@@ -174,16 +175,20 @@ export class ExternalRedditObscura {
   }
 
   private async connect(target: ObscuraTarget, session: ObscuraSession): Promise<Browser> {
-    const executable = this.config.obscuraPath ?? "/opt/agent-publisher/vendor/obscura/obscura";
+    const executable = this.mode === "lightpanda" ? this.config.lightpandaPath ?? "/usr/local/bin/lightpanda" : this.config.obscuraPath ?? "/opt/agent-publisher/vendor/obscura/obscura";
     if (path.isAbsolute(executable) && !fs.existsSync(executable)) throw new Error(`OBSCURA_START_FAILED: executable not found at ${executable}`);
     const portFile = path.join(target.storageDir, "ObscuraDebugPort");
     fs.writeFileSync(portFile, `${target.port}\n`, { encoding: "utf8", mode: 0o600 });
     fs.chmodSync(portFile, 0o600);
 
-    const child = spawn(executable, [
-      "--stealth", "--storage-dir", target.storageDir,
-      "serve", "--host", "127.0.0.1", "--port", String(target.port), "--max-connections", "8",
-    ], { stdio: "ignore", env: process.env });
+    const args = this.mode === "lightpanda"
+      ? ["serve", "--host", "127.0.0.1", "--port", String(target.port), "--disable-metrics"]
+      : ["--stealth", "--storage-dir", target.storageDir,
+         "serve", "--host", "127.0.0.1", "--port", String(target.port), "--max-connections", "8"];
+    const child = spawn(executable, args, {
+      stdio: "ignore",
+      env: { ...process.env, LIGHTPANDA_DISABLE_TELEMETRY: "true", LIGHTPANDA_DISABLE_CORE_DUMP: "1" },
+    });
     session.process = child;
     child.once("exit", () => {
       if (session.process === child) session.process = undefined;
@@ -196,7 +201,7 @@ export class ExternalRedditObscura {
     for (let i = 0; i < 80; i += 1) {
       if (child.exitCode !== null) break;
       try {
-        browser = await chromium.connectOverCDP(`http://127.0.0.1:${target.port}`);
+        browser = await chromium.connectOverCDP(`${this.mode === "lightpanda" ? "ws" : "http"}://127.0.0.1:${target.port}`);
         break;
       } catch (error) {
         last = error;
@@ -209,6 +214,14 @@ export class ExternalRedditObscura {
       throw new Error(`OBSCURA_START_FAILED: cannot attach to local CDP endpoint: ${String(last)}`);
     }
 
+    if (this.mode === "lightpanda") {
+      try { session.context = await browser.newContext(); }
+      catch (error) {
+        await browser.close().catch(() => undefined);
+        if (child.exitCode === null) child.kill("SIGTERM");
+        throw error;
+      }
+    }
     session.authImported = false;
     session.browser = browser;
     browser.on("disconnected", () => {
@@ -282,12 +295,13 @@ export class ExternalRedditObscura {
   private async stopIfIdle(instance: string, session: ObscuraSession): Promise<void> {
     if (session.active > 0 || session.pins.size > 0 || session.connecting) return;
     try {
-      const context = session.browser?.isConnected() ? session.browser.contexts()[0] : undefined;
+      const context = session.browser?.isConnected() ? session.context ?? session.browser.contexts()[0] : undefined;
       if (context && session.target) await this.persistAuth(session.target, context).catch(() => undefined);
       if (session.browser?.isConnected()) await session.browser.close().catch(() => undefined);
       if (session.process && session.process.exitCode === null) session.process.kill("SIGTERM");
     } finally {
       session.browser = undefined;
+      session.context = undefined;
       session.process = undefined;
       session.authImported = false;
       ExternalRedditObscura.sessions.delete(instance);
