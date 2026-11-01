@@ -50,7 +50,7 @@ ssh -N -L 5901:127.0.0.1:5901 YOUR_USER@YOUR_SERVER
 
 Then connect a VNC viewer to `localhost:5901` and complete Reddit login in Chrome once. Setup does not use `sudo` or install operating-system packages behind your back.
 
-See [Browser modes](../docs/browser-modes.md) for desktop, VPS, and manual deployment details.
+See [Browser modes](browser-modes.md) for desktop, VPS, and manual deployment details.
 
 ### Manual/source setup
 
@@ -58,7 +58,7 @@ The old explicit path remains available for advanced deployments:
 
 ```bash
 git clone https://github.com/Bl0ck154/reddit-mcp-publisher.git
-cd reddit-agent-publisher
+cd reddit-mcp-publisher
 npm ci
 npm run build
 node dist/cli.js setup
@@ -85,4 +85,4 @@ If the CLI is not on your PATH after the one-off `npx` setup, use the generated 
 
 ## Distribution status
 
-The GitHub source installer works independently of the npm registry. Do **not** use `npx -y reddit-mcp-publisher setup` until this package appears on [npm](https://www.npmjs.com/package/reddit-agent-publisher). After its first successful npm release, that shorter command will become the recommended install path.
+The GitHub source installer works independently of the npm registry. Do **not** use `npx -y reddit-mcp-publisher setup` until this package appears on [npm](https://www.npmjs.com/package/reddit-mcp-publisher). After its first successful npm release, that shorter command will become the recommended install path.
