@@ -3,30 +3,33 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ExternalRedditObscura } from "../external-reddit-obscura.js";
+import { ExternalRedditLightpanda } from "../external-reddit-lightpanda.js";
 import { seal } from "../crypto-store.js";
 import { loadConfig, type Config } from "../config.js";
 
-test("Lightpanda session is isolated from Obscura and Chrome authentication", () => {
+test("Lightpanda credentials are isolated from legacy Reddit snapshots", () => {
   const root=fs.mkdtempSync(path.join(os.tmpdir(),"reddit-lightpanda-test-"));
-  const current=process.env.NODE_ENV;
+  const previousNodeEnv=process.env.NODE_ENV;
+  const previousKeyFile=process.env.PUBLISHER_MASTER_KEY_FILE;
   try {
     process.env.NODE_ENV="test";
-    const source=path.join(root,"auth","reddit");
-    fs.mkdirSync(source,{recursive:true});
-    const sample=[{name:"reddit_session",value:"synthetic-value",domain:".reddit.com",path:"/",expires:0,httpOnly:true,secure:true,sameSite:"Lax"}];
-    fs.writeFileSync(path.join(source,"owner-main.cookies.enc"),seal(sample));
+    delete process.env.PUBLISHER_MASTER_KEY_FILE;
     const config={stateDir:root} as Config;
-    const obscura=new ExternalRedditObscura(config);
-    const lightpanda=new ExternalRedditObscura(config,"lightpanda");
-    assert.equal(obscura.hasAuthSnapshot("owner-main"),true);
+    const lightpanda=new ExternalRedditLightpanda(config);
+    const legacy=path.join(root,"auth","reddit");
+    fs.mkdirSync(legacy,{recursive:true});
+    const sample=[{name:"reddit_session",value:"synthetic-value",domain:".reddit.com",path:"/",expires:0,httpOnly:true,secure:true,sameSite:"Lax"}];
+    fs.writeFileSync(path.join(legacy,"owner-main.cookies.enc"),seal(sample));
     assert.equal(lightpanda.hasAuthSnapshot("owner-main"),false);
-    const destination=path.join(root,"auth","lightpanda","owner-main.cookies.enc");
-    fs.writeFileSync(destination,seal(sample));
+    const dest=path.join(root,"auth","lightpanda","owner-main.cookies.enc");
+    fs.mkdirSync(path.dirname(dest),{recursive:true});
+    fs.writeFileSync(dest,seal(sample));
     assert.equal(lightpanda.hasAuthSnapshot("owner-main"),true);
-    assert.equal(obscura.hasAuthSnapshot("owner-main"),true);
   } finally {
-    if(current===undefined)delete process.env.NODE_ENV;else process.env.NODE_ENV=current;
+    if (previousNodeEnv===undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV=previousNodeEnv;
+    if (previousKeyFile===undefined) delete process.env.PUBLISHER_MASTER_KEY_FILE;
+    else process.env.PUBLISHER_MASTER_KEY_FILE=previousKeyFile;
     fs.rmSync(root,{recursive:true,force:true});
   }
 });
