@@ -187,3 +187,15 @@ test("publication status keeps delivery and moderation outcomes separate, withou
   assert.equal(row.visibility_reason,"explicit_removal_notice");
   publisher.store.db.close();
 });
+
+test("read-only Reddit post visibility by permalink does not create a new publication",async()=>{
+  const {publisher,adapter}=makePublisher();
+  (adapter as any).publicationVisibility=async()=>({status:"REMOVED",reason:"reddit_listing_moderator",checked_at:"2026-11-01T22:00:00Z"});
+  const result=await publisher.redditPostVisibility("default","https://www.reddit.com/r/example/comments/abc123/");
+  assert.equal(result.ok,true);
+  assert.equal(result.side_effect.performed,false);
+  assert.equal((result.result as any).visibility_status,"REMOVED");
+  assert.equal((result.result as any).public_visibility_verified,false);
+  assert.equal(adapter.published,0);
+  publisher.store.db.close();
+});
