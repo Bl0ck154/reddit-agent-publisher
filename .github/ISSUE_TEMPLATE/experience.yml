@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thank you for trying Reddit Agent Publisher. Report actual results only.
+        Thank you for trying Reddit MCP Publisher. Report actual results only.
         Do not upload cookies, credentials, private messages, login screenshots, or personal data.
   - type: dropdown
     id: outcome

@@ -9,7 +9,7 @@ Most Reddit integrations solve one of two problems:
 1. **Read Reddit for an LLM** — search, browse posts, fetch comments.
 2. **Call Reddit's API as a bot/script** — create a post or comment with API credentials.
 
-Reddit Agent Publisher is aimed at a different problem:
+Reddit MCP Publisher is aimed at a different problem:
 
 > **How do you let an AI agent operate your real Reddit account with enough context to make good decisions, while keeping targeting, approval, authentication, and retries under control?**
 
@@ -83,11 +83,11 @@ You log into Reddit normally in an owner-controlled Chrome profile. The publishe
 
 ## A different category from typical Reddit MCP servers
 
-There are other Reddit MCP projects, including read-only tools and API-based projects with write support. Reddit Agent Publisher does **not** claim that nobody else can post to Reddit from MCP.
+There are other Reddit MCP projects, including read-only tools and API-based projects with write support. Reddit MCP Publisher does **not** claim that nobody else can post to Reddit from MCP.
 
 The distinction is the combination of browser-native account control, Reddit Chat, bell awareness, eligibility checks, exact live previews, and mutation safety.
 
-| Capability | Reddit Agent Publisher | Typical read-only Reddit MCP | Typical API-first write MCP* |
+| Capability | Reddit MCP Publisher | Typical read-only Reddit MCP | Typical API-first write MCP* |
 | --- | --- | --- | --- |
 | Read posts/comments | ✅ | ✅ | ✅ |
 | Use existing logged-in browser session | ✅ | Usually no | Usually no |

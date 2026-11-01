@@ -16,9 +16,9 @@ export function buildActionsOpenApi(baseUrl: string): Record<string, unknown> {
     openapi: "3.1.0",
     jsonSchemaDialect: "https://json-schema.org/draft/2020-12/schema",
     info: {
-      title: "Reddit Agent Publisher Actions",
+      title: "Reddit MCP Publisher Actions",
       version: "1.2.2",
-      description: "Owner-only GPT Actions gateway for Reddit Agent Publisher. Reddit context operations are read-only. Preview operations never submit content. Finalized Reddit posts/comments can use one-step consequential publish actions; legacy publishPublication publishes an existing exact preview.",
+      description: "Owner-only GPT Actions gateway for Reddit MCP Publisher. Reddit context operations are read-only. Preview operations never submit content. Finalized Reddit posts/comments can use one-step consequential publish actions; legacy publishPublication publishes an existing exact preview.",
     },
     servers: [{ url: server }],
     security: [{ bearerAuth: [] }],

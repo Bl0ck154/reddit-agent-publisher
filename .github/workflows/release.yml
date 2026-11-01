@@ -44,7 +44,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/pack" "$RUNNER_TEMP/install"
           ARCHIVE="$(npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/pack" --silent | tail -n 1)"
           npm install --prefix "$RUNNER_TEMP/install" --ignore-scripts --no-audit --no-fund "$RUNNER_TEMP/pack/$ARCHIVE"
-          "$RUNNER_TEMP/install/node_modules/.bin/reddit-agent-publisher" --help | grep -q 'setup'
+          "$RUNNER_TEMP/install/node_modules/.bin/reddit-mcp-publisher" --help | grep -q 'setup'
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}

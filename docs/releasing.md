@@ -15,22 +15,22 @@ The `release.yml` workflow runs on tags `v*`. It checks the tag against package/
 
 ```bash
 git checkout main && git pull --ff-only
-git tag v0.3.0
-git push origin v0.3.0
+git tag v0.3.1
+git push origin v0.3.1
 ```
 
-Use the current version rather than copying `v0.3.0` after a later bump. Check the [Releases page](https://github.com/Bl0ck154/reddit-agent-publisher/releases). Do not retag a published version.
+Use the current version rather than copying `v0.3.1` after a later bump. Check the [Releases page](https://github.com/Bl0ck154/reddit-mcp-publisher/releases). Do not retag a published version.
 
 ## First npm publication (owner action required)
 
-As of 2026-11-01 the public `reddit-agent-publisher` package returns npm E404 and the production server has no authenticated npm account. The first publication therefore **has not happened**.
+As of 2026-11-02 the public `reddit-mcp-publisher` package returns npm E404 and the production server has no authenticated npm account. The first publication therefore **has not happened**.
 
 1. Verify the npm account owns or can claim the package name; enable 2FA and login on a trusted development machine, not via an AI conversation.
 2. From the verified release commit and a clean checkout, run `npm ci && npm run check && npm pack --dry-run`.
 3. Run `npm publish --access public` from that trusted machine (may require interactive 2FA). Never paste tokens into GitHub issues.
-4. Confirm `npm view reddit-agent-publisher version`, then test `npx -y reddit-agent-publisher --help` and setup in a disposable environment.
+4. Confirm `npm view reddit-mcp-publisher version`, then test `npx -y reddit-mcp-publisher --help` and setup in a disposable environment.
 
-After the first publication, configure **npm Trusted Publishing** under the package settings for GitHub owner `Bl0ck154`, repository `reddit-agent-publisher`, workflow filename `publish-npm.yml` with permission to publish. The manually dispatched `publish-npm.yml` workflow uses GitHub Actions OIDC with Node 24/npm 11+; it refuses mismatched versions. It is intentionally not automatic on every git tag because registry access and ownership must be established first.
+After the first publication, configure **npm Trusted Publishing** under the package settings for GitHub owner `Bl0ck154`, repository `reddit-mcp-publisher`, workflow filename `publish-npm.yml` with permission to publish. The manually dispatched `publish-npm.yml` workflow uses GitHub Actions OIDC with Node 24/npm 11+; it refuses mismatched versions. It is intentionally not automatic on every git tag because registry access and ownership must be established first.
 
 Official guide: [npm Trusted Publishers](https://docs.npmjs.com/trusted-publishers/).
 

@@ -1,19 +1,27 @@
 # Browser modes
 
-Reddit Agent Publisher keeps Reddit authentication in an owner-controlled Chrome profile. The recommended path is now the setup command; the manual modes remain available for advanced deployments.
+Reddit MCP Publisher keeps Reddit authentication in an owner-controlled Chrome profile. The recommended path is now the setup command; the manual modes remain available for advanced deployments.
+
+## Lightweight read mode
+
+On a new installation, Reddit reads prefer LightPanda when an authenticated encrypted cookie snapshot already exists. The publisher then tries compatible read backends before Chrome. Login challenges, writing, live previews, uploads and submissions still use **Chrome/Chromium**.
+
+Choose explicitly via PUBLISHER_REDDIT_BROWSER=lightpanda or PUBLISHER_REDDIT_BROWSER=chrome. Existing saved browser preferences override the default; LightPanda is optional and will not be downloaded or receive Chrome login cookies automatically. You can set PUBLISHER_LIGHTPANDA to its executable path.
+
+The historical systemd unit names and state directory remain unchanged. See [migration notes](migrating.md).
 
 ## Recommended: setup-managed install
 
 From the GitHub repository package:
 
 ```bash
-npx -y github:Bl0ck154/reddit-agent-publisher setup
+npx -y github:Bl0ck154/reddit-mcp-publisher setup
 ```
 
 After an npm registry release, the shorter equivalent is:
 
 ```bash
-npx -y reddit-agent-publisher setup
+npx -y reddit-mcp-publisher setup
 ```
 
 The setup command:
@@ -31,10 +39,10 @@ Setup is safe to rerun. In particular, it does **not** rotate an existing master
 Useful variants:
 
 ```bash
-reddit-agent-publisher setup --mode desktop --client codex
-reddit-agent-publisher setup --mode server --client claude
-reddit-agent-publisher setup --no-systemd
-reddit-agent-publisher setup --non-interactive
+reddit-mcp-publisher setup --mode desktop --client codex
+reddit-mcp-publisher setup --mode server --client claude
+reddit-mcp-publisher setup --no-systemd
+reddit-mcp-publisher setup --non-interactive
 ```
 
 ## Desktop behavior
@@ -55,7 +63,7 @@ If user systemd is unavailable, setup falls back to a loopback-only portable CDP
 Use:
 
 ```bash
-reddit-agent-publisher setup --mode server
+reddit-mcp-publisher setup --mode server
 ```
 
 The Publisher daemon and browser service are still user-scoped. If `Xvfb` is already installed, setup also creates a private `:98` virtual desktop. If `x11vnc` is installed as well, setup creates a VNC service with these security properties:

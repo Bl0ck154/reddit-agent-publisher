@@ -1,12 +1,14 @@
-# Reddit Agent Publisher
+# Reddit MCP Publisher
 
-[![CI](https://github.com/Bl0ck154/reddit-agent-publisher/actions/workflows/ci.yml/badge.svg)](https://github.com/Bl0ck154/reddit-agent-publisher/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/Bl0ck154/reddit-agent-publisher)](https://github.com/Bl0ck154/reddit-agent-publisher/releases/latest)
+[![CI](https://github.com/Bl0ck154/reddit-mcp-publisher/actions/workflows/ci.yml/badge.svg)](https://github.com/Bl0ck154/reddit-mcp-publisher/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Bl0ck154/reddit-mcp-publisher)](https://github.com/Bl0ck154/reddit-mcp-publisher/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **Give an AI agent access to your own Reddit account, with a browser preview and owner-controlled publishing.** Read threads, subreddit rules, removal notices, inbox and Reddit Chat; prepare posts, comments and DMs; review the exact target before sending.
 
-Works with MCP clients such as Codex, Claude Desktop and OpenCode, plus the local CLI and an optional Custom GPT Actions gateway. Runs on your machine or VPS using your authenticated Chrome/Chromium profile. You control login and approval.
+Works with Codex, Claude Desktop, OpenCode and other MCP clients. Runs locally or on a VPS with your own authenticated Reddit session.
+
+**LightPanda-first for supported reads.** When an encrypted authenticated snapshot is available, the lightweight [LightPanda](https://github.com/lightpanda-io/browser) backend is preferred for supported Reddit reads. The publisher falls back to another compatible browser when needed. **Chrome/Chromium is still required for login, live previews and all writes.**
 
 ## See the workflow
 
@@ -19,11 +21,11 @@ Works with MCP clients such as Codex, Claude Desktop and OpenCode, plus the loca
 **2. The agent checks eligibility and prepares a draft**
 
 ```bash
-reddit-agent-publisher reddit-preflight test
-reddit-agent-publisher prepare reddit-post --subreddit test \
+reddit-mcp-publisher reddit-preflight test
+reddit-mcp-publisher prepare reddit-post --subreddit test \
   --title "A small tool I built for Reddit workflows" \
   --body "I built a self-hosted publisher with a review step. Feedback welcome."
-reddit-agent-publisher preview <draft-id>
+reddit-mcp-publisher preview <draft-id>
 ```
 
 **3. Review the live Reddit preview**
@@ -38,8 +40,8 @@ Action:      Awaiting owner approval. Nothing has been posted.
 **4. Approve the exact draft, then publish**
 
 ```bash
-reddit-agent-publisher approve <draft-id> --digest <preview-sha256>
-reddit-agent-publisher publish <draft-id> --approval <approval-token>
+reddit-mcp-publisher approve <draft-id> --digest <preview-sha256>
+reddit-mcp-publisher publish <draft-id> --approval <approval-token>
 ```
 
 The final result, **if the subreddit accepts the post**, is a Reddit permalink and a recorded publication status. Approval is interactive in the CLI, and the displayed placeholders come from real prepare/preview/approve responses. The publisher checks existing status before retrying an ambiguous write.
@@ -48,22 +50,22 @@ The final result, **if the subreddit accepts the post**, is a Reddit permalink a
 
 ## Install
 
-Requirements: **Node.js 22+, npm, Chrome/Chromium** and an owner-controlled Reddit login. On a headless VPS, browser login may need Xvfb/VNC over an SSH tunnel.
+Requirements: **Node.js 22+, npm, Chrome/Chromium** and an owner-controlled Reddit login. LightPanda is optional; it needs a separately available authenticated snapshot to handle Reddit reads. On a headless VPS, browser login may need Xvfb/VNC over an SSH tunnel.
 
 ```bash
-npx -y github:Bl0ck154/reddit-agent-publisher setup
+npx -y github:Bl0ck154/reddit-mcp-publisher setup
 ```
 
 Choose your MCP client:
 
 ```bash
-npx -y github:Bl0ck154/reddit-agent-publisher setup --client codex
-npx -y github:Bl0ck154/reddit-agent-publisher setup --client claude
+npx -y github:Bl0ck154/reddit-mcp-publisher setup --client codex
+npx -y github:Bl0ck154/reddit-mcp-publisher setup --client claude
 ```
 
-Setup writes MCP configurations to `~/.local/share/reddit-agent-publisher/integrations/`. It preserves existing browser profiles and encryption keys on rerun. The installer does **not** ask an AI for your Reddit password.
+Setup writes MCP configurations under the existing state path '+chr(96)+'~/.local/share/reddit-agent-publisher/integrations/'+chr(96)+'. This path is retained for compatibility. It preserves existing browser profiles and encryption keys on rerun. The installer does **not** ask an AI for your Reddit password.
 
-**npm status:** this project is not yet available as a registry package. Until a verified publication, use the GitHub command above; do not use `npx reddit-agent-publisher`. See [desktop, server and manual setup](docs/installation.md).
+**npm status:** the renamed npm package is not published yet. Until a verified publication, use the GitHub command above; do not use `npx reddit-agent-publisher`. See [desktop, server and manual setup](docs/installation.md) and [migration notes](docs/migrating.md).
 
 ## What it does
 
@@ -84,6 +86,6 @@ The server is self-hosted; there is no public hosted bot and no Reddit API key r
 - [Release / npm / MCP Registry guide](docs/releasing.md) · [Changelog](CHANGELOG.md)
 - [Share a real use case or report a problem](docs/showcase.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
 
-Independent users can submit reproducible examples with sensitive details removed. [Open an experience report](https://github.com/Bl0ck154/reddit-agent-publisher/issues/new?template=experience.yml). We do not publish invented testimonials or count owner-created demos as third-party adoption.
+Independent users can submit reproducible examples with sensitive details removed. [Open an experience report](https://github.com/Bl0ck154/reddit-mcp-publisher/issues/new?template=experience.yml). We do not publish invented testimonials or count owner-created demos as third-party adoption.
 
 MIT licensed. Unaffiliated with Reddit.
