@@ -9,7 +9,11 @@ import { loadConfig, type Config } from "../config.js";
 
 test("Lightpanda credentials are isolated from legacy Reddit snapshots", () => {
   const root=fs.mkdtempSync(path.join(os.tmpdir(),"reddit-lightpanda-test-"));
+  const previousNodeEnv=process.env.NODE_ENV;
+  const previousKeyFile=process.env.PUBLISHER_MASTER_KEY_FILE;
   try {
+    process.env.NODE_ENV="test";
+    delete process.env.PUBLISHER_MASTER_KEY_FILE;
     const config={stateDir:root} as Config;
     const lightpanda=new ExternalRedditLightpanda(config);
     const legacy=path.join(root,"auth","reddit");
@@ -21,7 +25,13 @@ test("Lightpanda credentials are isolated from legacy Reddit snapshots", () => {
     fs.mkdirSync(path.dirname(dest),{recursive:true});
     fs.writeFileSync(dest,seal(sample));
     assert.equal(lightpanda.hasAuthSnapshot("owner-main"),true);
-  } finally {fs.rmSync(root,{recursive:true,force:true});}
+  } finally {
+    if (previousNodeEnv===undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV=previousNodeEnv;
+    if (previousKeyFile===undefined) delete process.env.PUBLISHER_MASTER_KEY_FILE;
+    else process.env.PUBLISHER_MASTER_KEY_FILE=previousKeyFile;
+    fs.rmSync(root,{recursive:true,force:true});
+  }
 });
 
 test("Lightpanda is an explicit optional Reddit browser mode",()=>{
