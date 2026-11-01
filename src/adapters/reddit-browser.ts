@@ -22,6 +22,8 @@ type PreviewSession = {
   submit?: Locator; deleteControl?: Locator; titleField?: Locator; bodyField?: Locator; linkField?: Locator;
   title?: string; body?: string; outboundUrl?: string; flair?: string; flairControl?: Locator;
   mediaScope?: Locator;
+  mediaField?: Locator;
+  expectedMedia?: MediaFile[];
   voteDirection?: RedditVoteDirection; voteStateBefore?: RedditVoteState;
 };
 type CacheEntry = { value: Record<string, unknown>; storedAt: number; expiresAt: number };
@@ -188,6 +190,47 @@ const ui = {
   downvote: [/^downvote$/i, /remove downvote/i, /скасувати даунвоут/i, /даунвоут/i],
 };
 
+export type RedditVisibilityStatus = "REMOVED" | "PENDING_REVIEW" | "DELETED" | "VISIBLE_TO_AUTHOR" | "UNKNOWN";
+
+export function classifyRedditPostVisibility(postText: string, postFound: boolean): { status: RedditVisibilityStatus; reason: string } {
+  const text=postText.replace(/\s+/g," ").trim();
+  if (/removed by (?:the )?(?:moderators?|mods?|reddit(?:\x27s)? filters?)/i.test(text) || /(?:this |your )?post (?:was|has been) removed/i.test(text))
+    return {status:"REMOVED",reason:"explicit_removal_notice"};
+  if (/deleted by (?:the )?(?:author|person who originally posted)|this post was deleted/i.test(text))
+    return {status:"DELETED",reason:"explicit_deletion_notice"};
+  if (/pending (?:moderator )?(?:approval|review)|awaiting (?:moderator )?approval|waiting for (?:moderator )?approval|post is awaiting review/i.test(text))
+    return {status:"PENDING_REVIEW",reason:"explicit_review_notice"};
+  return postFound ? {status:"VISIBLE_TO_AUTHOR",reason:"authenticated_view_only_not_public_proof"} : {status:"UNKNOWN",reason:"no_verified_post_or_moderation_signal"};
+}
+
+export function classifyRedditListingModeration(payload: unknown, expectedFullname: string): { status: RedditVisibilityStatus; reason: string } {
+  if (!Array.isArray(payload)) return {status:"UNKNOWN",reason:"no_reddit_listing"};
+  const row=(payload[0] as any)?.data?.children?.[0];
+  const post=row?.kind==="t3" ? row.data : undefined;
+  if (!post || String(post.name??"")!==expectedFullname) return {status:"UNKNOWN",reason:"listing_post_identity_mismatch"};
+  const category=String(post.removed_by_category??"").toLowerCase();
+  if (category==="automod_filtered") return {status:"PENDING_REVIEW",reason:"reddit_listing_automod_filtered"};
+  if (category==="deleted") return {status:"DELETED",reason:"reddit_listing_deleted"};
+  if (["moderator","reddit","automod","content_takedown","copyright_takedown","anti_evil_ops"].includes(category))
+    return {status:"REMOVED",reason:"reddit_listing_"+category};
+  return {status:"UNKNOWN",reason:"no_explicit_moderation_flag"};
+}
+
+export function redditMediaFilesMatch(expected: Array<{name:string;size:number}>, selected: Array<{name:string;size:number}>): boolean {
+  return expected.length > 0 && expected.length === selected.length &&
+    expected.every((file,index)=>file.name===selected[index]?.name && file.size===selected[index]?.size);
+}
+
+export function redditReadBackendOrder(preferred: Config["redditBrowser"], obscuraAvailable: boolean, lightpandaAvailable: boolean): Array<"chrome"|"obscura"|"lightpanda"> {
+  if (!preferred || preferred==="chrome") return ["chrome"];
+  const order: Array<"chrome"|"obscura"|"lightpanda">=[];
+  if (preferred==="obscura" && obscuraAvailable) order.push("obscura");
+  if (preferred==="lightpanda" && lightpandaAvailable) order.push("lightpanda");
+  if (preferred!=="obscura" && obscuraAvailable) order.push("obscura");
+  if (preferred!=="lightpanda" && lightpandaAvailable) order.push("lightpanda");
+  return [...order,"chrome"];
+}
+
 export class RedditBrowserAdapter implements Adapter {
   readonly id = "reddit";
   private chrome: ExternalChrome;
@@ -196,7 +239,7 @@ export class RedditBrowserAdapter implements Adapter {
   private pageBackends = new WeakMap<Page, "chrome" | "obscura" | "lightpanda">();
   private pinnedBackends = new Map<string, "chrome" | "obscura" | "lightpanda">();
   private browserValidated = new Set<string>();
-  private browserDisabledUntil = 0;
+  private browserDisabledUntil = new Map<string,number>();
   private previews = new Map<string, PreviewSession>();
   private previewTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private rulesCache = new Map<string, CacheEntry>();
@@ -288,7 +331,7 @@ export class RedditBrowserAdapter implements Adapter {
         note: gate ?? "Persistent authenticated Reddit profile is available." };
     } catch (error) {
       if (this.pageBackends.get(page) === "lightpanda" && /Target page, context or browser has been closed|browserContext.cookies|Browser has been closed/i.test(String(error))) {
-        this.browserDisabledUntil = Date.now() + 300_000;
+        this.browserDisabledUntil.set("lightpanda:"+account,Date.now()+300_000);
         return await this.status(account);
       }
       throw error;
@@ -352,7 +395,7 @@ export class RedditBrowserAdapter implements Adapter {
       return value;
     } catch (error) {
       if (this.pageBackends.get(page) === "lightpanda" && /Target page, context or browser has been closed|browserContext.cookies|Browser has been closed/i.test(String(error))) {
-        this.browserDisabledUntil = Date.now() + 300_000;
+        this.browserDisabledUntil.set("lightpanda:"+account,Date.now()+300_000);
         return await this.rules(account, subreddit);
       }
       throw error;
@@ -629,7 +672,7 @@ export class RedditBrowserAdapter implements Adapter {
       if (d.action === "create_post") {
         const canonical = canonicalRedditPublishedPostUrl(s.page.url(), String(d.target.subreddit));
         if (!canonical) {
-          return { status: "PUBLISHED", warnings: ["Reddit published the post, but the browser did not expose a canonical post permalink. The non-canonical browser URL was intentionally not returned."] };
+          throw new Error("PUBLISH_RESULT_AMBIGUOUS: Reddit composer completed but no canonical post ID was returned. Check the account activity before attempting any new post.");
         }
         return { status: "PUBLISHED", external_id: canonical.fullname, url: canonical.url, warnings: [] };
       }
@@ -650,6 +693,40 @@ export class RedditBrowserAdapter implements Adapter {
     } finally {
       this.forgetPreview(d.id);
       this.unpinBackend(d.account, pin);
+    }
+  }
+
+  async publicationVisibility(account: string, canonicalUrl: string): Promise<{status:RedditVisibilityStatus;reason:string;checked_at:string}> {
+    const id=this.permalink(canonicalUrl);
+    if (id.commentId) throw new Error("VISIBILITY_UNSUPPORTED: post status needs a post permalink");
+    const page=await this.page(account,true);
+    try {
+      await this.gotoRetry(page,id.permalink);
+      this.assertOrigin(page.url());
+      const gate=await this.gate(page);
+      if (gate) return {status:"UNKNOWN",reason:"authentication_or_network_gate",checked_at:new Date().toISOString()};
+      const post=page.locator('shreddit-post[thingid="'+id.fullname+'"],shreddit-post[id="'+id.fullname+'"]');
+      const found=await post.count()===1;
+      const postText=found ? await post.first().innerText().catch(()=>"") : "";
+      // The post may be hidden behind a moderation banner outside the post element.
+      const mainText=(await page.locator("main").first().innerText().catch(()=>"")).slice(0,2500);
+      const explicitNotice=classifyRedditPostVisibility(postText,false);
+      const bannerNotice=classifyRedditPostVisibility(mainText.slice(0,1200),false);
+      let listing:unknown;
+      try {
+        listing=await page.evaluate(async(url)=>{
+          const response=await fetch(url,{credentials:"include",headers:{Accept:"application/json"}});
+          return response.ok ? await response.json() : undefined;
+        },id.permalink+"?raw_json=1");
+      } catch { /* Missing Reddit listing data does not prove that a post is visible. */ }
+      const listingSignal=classifyRedditListingModeration(listing,id.fullname);
+      const result=listingSignal.status!=="UNKNOWN" ? listingSignal :
+        explicitNotice.status!=="UNKNOWN" ? explicitNotice :
+        bannerNotice.status==="REMOVED" || bannerNotice.status==="PENDING_REVIEW" || bannerNotice.status==="DELETED" ? bannerNotice :
+        classifyRedditPostVisibility(postText,found);
+      return {...result,checked_at:new Date().toISOString()};
+    } finally {
+      await this.releasePage(page,account);
     }
   }
 
@@ -687,6 +764,7 @@ export class RedditBrowserAdapter implements Adapter {
       const mediaInput = await this.imageFileInput(page);
       if (media.length > 1 && await mediaInput.getAttribute("multiple") === null) throw new PublisherError("REDDIT_MEDIA_LIMIT","The current Reddit image form accepts only one file for this community/post type. Nothing was published.",{subreddit:sub,requested_images:media.length});
       await mediaInput.setInputFiles(media.map(file=>file.path));
+      await this.verifySelectedMedia(mediaInput,media);
       mediaScope=page.locator('r-post-media-input#post-composer_media');
       await mediaScope.getByRole("button",{name:/remove media/i}).waitFor({state:"visible",timeout:30_000})
         .catch(()=>{throw new Error("SITE_CHANGED: Reddit did not render the selected image preview");});
@@ -720,11 +798,15 @@ export class RedditBrowserAdapter implements Adapter {
     if (d.content.flair) flairControl = await this.chooseFlair(page, String(d.content.flair));
     const form = await this.formFor(page, titleField);
     const submit = await this.needUniqueAny(form, ["button"], ui.post);
-    if (media.length) await this.waitEnabled(submit,30_000,"SITE_CHANGED: Reddit did not finish preparing the selected image upload");
+    if (media.length) {
+      await this.waitEnabled(submit,30_000,"SITE_CHANGED: Reddit did not finish preparing the selected image upload");
+      await this.verifySelectedMedia(await this.imageFileInput(page),media);
+    }
     const scope = page.locator("main");
     return { page, action: d.action, pageUrl: page.url(), targetIdentity: `r/${sub}`, targetScope: scope, submit, titleField, bodyField, linkField,
       title: String(d.content.title), body: d.content.body ? String(d.content.body) : undefined, outboundUrl: d.content.url ? String(d.content.url) : undefined,
-      flair: d.content.flair ? String(d.content.flair) : undefined, flairControl, mediaScope };
+      flair: d.content.flair ? String(d.content.flair) : undefined, flairControl, mediaScope,
+      mediaField: media.length ? await this.imageFileInput(page) : undefined, expectedMedia: media.length ? media : undefined };
   }
 
   private async previewComment(page: Page, d: Draft): Promise<PreviewSession> {
@@ -847,6 +929,7 @@ export class RedditBrowserAdapter implements Adapter {
     if (s.bodyField && await this.fieldValue(s.bodyField) !== s.body) throw new Error("APPROVAL_STALE: body/comment changed after preview");
     if (s.linkField && await s.linkField.inputValue() !== s.outboundUrl) throw new Error("APPROVAL_STALE: outbound URL changed after preview");
     if (s.mediaScope && (!await s.mediaScope.isVisible().catch(()=>false) || !await s.mediaScope.getByRole("button",{name:/remove media/i}).isVisible().catch(()=>false))) throw new Error("APPROVAL_STALE: selected Reddit images disappeared after preview");
+    if (s.mediaField && s.expectedMedia) await this.verifySelectedMedia(s.mediaField,s.expectedMedia);
     if (s.flair && !s.flairControl) throw new Error("APPROVAL_STALE: flair control disappeared after preview");
   }
 
@@ -1051,6 +1134,19 @@ export class RedditBrowserAdapter implements Adapter {
     });
   }
 
+  private async verifySelectedMedia(input: Locator, media: MediaFile[]): Promise<void> {
+    const selected=await input.evaluate(element=>{
+      if (!(element instanceof HTMLInputElement) || element.type!=="file") return [];
+      return Array.from(element.files??[]).map(file=>({name:file.name,size:file.size}));
+    }).catch(()=>[] as Array<{name:string;size:number}>);
+    const expected=media.map(file=>({name:path.basename(file.path),size:file.size}));
+    if (!redditMediaFilesMatch(expected,selected)) {
+      throw new PublisherError("REDDIT_MEDIA_SELECTION_INCOMPLETE",
+        "Reddit image picker no longer contains every approved image with its expected filename and size. Nothing was published.",
+        { expected_count:expected.length, selected_count:selected.length });
+    }
+  }
+
   private async imageFileInput(page: Page): Promise<Locator> {
     const pick=async():Promise<Locator|undefined>=>{
       const labeled=page.getByLabel(/upload|image|photo|зображ|фото|изображ/i);
@@ -1176,36 +1272,41 @@ export class RedditBrowserAdapter implements Adapter {
   }
 
   private async page(account: string, lean: boolean, forceChrome = false): Promise<Page> {
-    let page: Page;
+    let page: Page | undefined;
     let backend: "chrome" | "obscura" | "lightpanda" = "chrome";
-    const preferred = !forceChrome && this.config.redditBrowser !== "chrome" ? this.config.redditBrowser : undefined;
-    const client = preferred === "lightpanda" ? this.lightpanda : this.obscura;
-    const canUseBackend = Boolean(preferred) && Date.now() >= this.browserDisabledUntil &&
-      client.hasAuthSnapshot(account);
-    if (canUseBackend) {
-      let acquired = false;
+    const order=forceChrome ? ["chrome"] as const : redditReadBackendOrder(
+      this.config.redditBrowser,this.obscura.hasAuthSnapshot(account),this.lightpanda.hasAuthSnapshot(account));
+    for (const candidate of order) {
+      if (candidate==="chrome") break;
+      const validationKey=candidate+":"+account;
+      if (Date.now() < (this.browserDisabledUntil.get(validationKey) ?? 0)) continue;
+      const client=candidate==="obscura" ? this.obscura : this.lightpanda;
+      let acquired=false;
       try {
-        page = await client.page(account);
-        acquired = true;
-        const validationKey = preferred + ":" + account;
+        page=await client.page(account);
+        acquired=true;
         if (!this.browserValidated.has(validationKey)) {
-          await page.goto("https://www.reddit.com/", { waitUntil: "domcontentloaded", timeout: 25_000 });
-          const identity = await page.evaluate(async () => {
-            const response = await fetch("/api/me.json?raw_json=1", { credentials: "include" });
-            if (!response.ok) return "";
-            const payload = await response.json() as { data?: { name?: string } };
-            return String(payload?.data?.name ?? "");
+          await page.goto("https://www.reddit.com/",{waitUntil:"domcontentloaded",timeout:25_000});
+          const identity=await page.evaluate(async()=>{
+            const response=await fetch("/api/me.json?raw_json=1",{credentials:"include"});
+            if(!response.ok) return "";
+            const payload=await response.json() as {data?:{name?:string}};
+            return String(payload?.data?.name??"");
           });
-          if (!identity) throw new Error("REDDIT_BROWSER_AUTH_REQUIRED");
+          if(!identity) throw new Error("REDDIT_BROWSER_AUTH_REQUIRED");
           this.browserValidated.add(validationKey);
         }
-        backend = preferred!;
+        backend=candidate;
+        this.browserDisabledUntil.delete(validationKey);
+        break;
       } catch {
-        if (acquired) await client.release(account).catch(() => undefined);
-        this.browserDisabledUntil = Date.now() + 300_000;
-        page = await this.chrome.page(account);
+        if (acquired) await client.release(account).catch(()=>undefined);
+        page=undefined;
+        this.browserValidated.delete(validationKey);
+        this.browserDisabledUntil.set(validationKey,Date.now()+300_000);
       }
-    } else page = await this.chrome.page(account);
+    }
+    if (!page) page=await this.chrome.page(account);
     this.pageBackends.set(page, backend);
     let state = this.leanStates.get(page);
     if (!state) {

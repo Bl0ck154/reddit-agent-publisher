@@ -76,6 +76,9 @@ export class Store {
     if (!publications.has("metadata_ciphertext")) {
       this.db.exec("ALTER TABLE publications ADD COLUMN metadata_ciphertext TEXT NOT NULL DEFAULT ''");
     }
+    // Separate receipt table: older private Publisher builds use positional
+    // INSERT INTO publications VALUES(...). Changing that table would break writes.
+    this.db.exec("CREATE TABLE IF NOT EXISTS publication_visibility (publication_id TEXT PRIMARY KEY NOT NULL, status TEXT NOT NULL, reason TEXT NOT NULL, checked_at TEXT NOT NULL, FOREIGN KEY(publication_id) REFERENCES publications(id))");
   }
 
   saveDraft(draft: Draft): void {

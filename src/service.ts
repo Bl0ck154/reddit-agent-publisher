@@ -171,7 +171,9 @@ export class PublisherService {
       this.store.audit("publication.published", actor, id, { external_id: r.external_id, url: r.url, retry_intent_reused:intent?.reused ?? false });
       this.lastMutation.set(lock, Date.now());
       return envelope({ state: "PUBLISHED", adapter: d.adapter, account: d.account, draft_id: id, revision: d.revision,
-        side_effect: { performed: r.performed ?? true }, result: r, warnings: r.warnings ?? [] });
+        side_effect: { performed: r.performed ?? true },
+        result: d.action==="create_post" ? {...r,visibility_status:"UNKNOWN",public_visibility_verified:false} : r,
+        warnings: r.warnings ?? [] });
     } catch (e: any) { const current=this.store.getDraft(id); if(current?.state==="PUBLISHING") this.store.updateState(id,isFinalPublishFailure(String(e.message))?"FAILED_FINAL":"FAILED_RETRYABLE"); this.store.audit("publication.failed", actor, id, { error: String(e.message).slice(0, 300) }); return this.fail(e, id); }
     finally { this.locks.delete(lock); }
   }
@@ -193,10 +195,36 @@ export class PublisherService {
   async publicationStatus(id: string): Promise<ResultEnvelope> {
     try {
       const d=this.needDraft(id);
-      const publication=this.store.db.prepare("SELECT external_id, canonical_url, created_at FROM publications WHERE draft_id=? ORDER BY created_at DESC LIMIT 1").get(id) as any;
+      const publication=this.store.db.prepare("SELECT p.id, p.external_id, p.canonical_url, p.created_at, v.status AS visibility_status, v.reason AS visibility_reason, v.checked_at AS visibility_checked_at FROM publications p LEFT JOIN publication_visibility v ON v.publication_id=p.id WHERE p.draft_id=? ORDER BY p.created_at DESC LIMIT 1").get(id) as any;
       const published=d.state === "PUBLISHED";
+      let visibilityStatus=String(publication?.visibility_status ?? "UNKNOWN");
+      let visibilityReason=String(publication?.visibility_reason ?? "not_checked");
+      let visibilityCheckedAt:string|undefined=publication?.visibility_checked_at ?? undefined;
+      if (published && d.action==="create_post" && publication?.canonical_url) {
+        const adapter=this.adapter(d.adapter) as RedditBrowserAdapter;
+        if (typeof adapter.publicationVisibility === "function") {
+          try {
+            // A successful submit is not proof that moderators kept the post.
+            // Never perform a second write while verifying an earlier one.
+            const checked=await adapter.publicationVisibility(d.account,String(publication.canonical_url));
+            visibilityStatus=checked.status;
+            visibilityReason=checked.reason;
+            visibilityCheckedAt=checked.checked_at;
+            this.store.db.prepare("INSERT INTO publication_visibility(publication_id,status,reason,checked_at) VALUES(?,?,?,?) ON CONFLICT(publication_id) DO UPDATE SET status=excluded.status,reason=excluded.reason,checked_at=excluded.checked_at")
+              .run(publication.id,visibilityStatus,visibilityReason,visibilityCheckedAt);
+            this.store.audit("publication.visibility_checked","status",id,{status:visibilityStatus,reason:visibilityReason});
+          } catch(error:any) {
+            // Read failures cannot reverse or prove the outcome of a prior submit.
+            visibilityStatus="UNKNOWN";
+            visibilityReason="verification_unavailable";
+            visibilityCheckedAt=new Date().toISOString();
+          }
+        }
+      }
       return envelope({ state:d.state,adapter:d.adapter,account:d.account,draft_id:id,revision:d.revision,side_effect:{performed:false},result:{
         draft_id:id,state:d.state,status:d.state,published,action:d.action,external_id:publication?.external_id ?? undefined,published_url:publication?.canonical_url ?? undefined,published_at:publication?.created_at ?? undefined,
+        visibility_status:visibilityStatus,visibility_reason:visibilityReason,visibility_checked_at:visibilityCheckedAt,
+        public_visibility_verified:false,
       }});
     } catch(e:any) { return this.fail(e,id); }
   }
