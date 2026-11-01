@@ -1,0 +1,56 @@
+name: Publish MCP Registry (owner initiated)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Exact npm and GitHub release version already available"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: v${{ inputs.version }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Verify public package and release versions
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          node --input-type=module -e '
+            import fs from "node:fs";
+            import assert from "node:assert/strict";
+            const pkg=JSON.parse(fs.readFileSync("package.json","utf8"));
+            const manifest=JSON.parse(fs.readFileSync("server.json","utf8"));
+            const version=process.env.RELEASE_VERSION;
+            assert.match(version,/^\d+\.\d+\.\d+$/);
+            assert.equal(pkg.name,"reddit-mcp-publisher");
+            assert.equal(pkg.version,version);
+            assert.equal(manifest.version,version);
+            assert.equal(manifest.packages?.[0]?.identifier,pkg.name);
+            assert.equal(manifest.packages?.[0]?.version,version);
+            assert.equal(manifest.name,"io.github.bl0ck154/reddit-mcp-publisher");
+          '
+          npm view "reddit-mcp-publisher@$RELEASE_VERSION" version --json | tr -d '"' | grep -Fx "$RELEASE_VERSION"
+      - name: Install official MCP publisher
+        run: |
+          curl -fsSL --retry 3 -o /tmp/mcp-publisher.tgz             https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz
+          tar -xzvf /tmp/mcp-publisher.tgz mcp-publisher
+          ./mcp-publisher --help > /dev/null
+      - name: Validate manifest
+        run: ./mcp-publisher validate server.json
+      - name: Publish via GitHub OIDC
+        run: |
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish server.json

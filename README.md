@@ -48,6 +48,13 @@ The final result, **if the subreddit accepts the post**, is a Reddit permalink a
 
 ![Publishing workflow: read, preview, approve, publish](assets/workflow.png)
 
+### Real browser preview
+
+![Cropped browser preview of an unpublished r/test draft](assets/reddit-preview-live-cropped.png)
+
+This is a real, cropped Reddit composer screenshot from a maintainer-run test on 2 November 2026. The preview filled the form without posting. [See the test steps and limits](docs/demo-live.md). The screenshot omits account information.
+
+
 ## Install
 
 Requirements: **Node.js 22+, npm, Chrome/Chromium** and an owner-controlled Reddit login. LightPanda is optional; it needs a separately available authenticated snapshot to handle Reddit reads. On a headless VPS, browser login may need Xvfb/VNC over an SSH tunnel.
@@ -79,11 +86,15 @@ Setup writes MCP configs under `~/.local/share/reddit-agent-publisher/integratio
 
 The server is self-hosted; there is no public hosted bot and no Reddit API key required for the core browser workflow. Reddit's own automation policies, rules and account restrictions still apply. Changes to Reddit's UI can require adapter fixes; uncertain actions stop rather than guessing.
 
+## When to use it
+
+Use Reddit MCP Publisher when an AI agent needs to read Reddit context or prepare a Reddit post with an exact browser preview and explicit owner approval. It is a self-hosted Reddit posting MCP server that runs through an authenticated Chrome session. The core browser workflow does not require Reddit developer API credentials. Chrome is still needed for login and writes, and Reddit's own account rules and moderation apply.
+
 ## Documentation and community
 
 - [Installation and troubleshooting](docs/installation.md) · [Browser modes](docs/browser-modes.md)
 - [Features, architecture, security and MCP tools](docs/features.md) · [Custom GPT Actions](docs/gpt-actions.md)
-- [Release / npm / MCP Registry guide](docs/releasing.md) · [Changelog](CHANGELOG.md)
+- [Release / npm / MCP Registry guide](docs/releasing.md) · [Directory submissions](docs/distribution.md) · [Changelog](CHANGELOG.md)
 - [Share a real use case or report a problem](docs/showcase.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
 
 Independent users can submit reproducible examples with sensitive details removed. [Open an experience report](https://github.com/Bl0ck154/reddit-mcp-publisher/issues/new?template=experience.yml). We do not publish invented testimonials or count owner-created demos as third-party adoption.
