@@ -34,7 +34,26 @@ After the first publication, configure **npm Trusted Publishing** under the pack
 
 Official guide: [npm Trusted Publishers](https://docs.npmjs.com/trusted-publishers/).
 
+## First npm publish: owner authentication required
+
+The package is not yet present in npm and the production server is not logged into npm. Trusted publishing cannot claim a package that does not exist. The npm owner must authenticate and complete the first publish on a trusted development machine:
+
+    npm login
+    npm whoami
+    git clone https://github.com/Bl0ck154/reddit-mcp-publisher.git
+    cd reddit-mcp-publisher
+    git checkout v0.3.2
+    npm ci
+    npm run check
+    npm pack --dry-run
+    npm publish --access public
+
+The first version is 0.3.2; use that released tag rather than arbitrary unreleased main. Check the intended package name and publishing identity. Never send credentials or 2FA codes to an agent.
+
+After publication, configure Trusted Publishing for the GitHub Actions publish-npm.yml workflow inside the npm package settings.
+
 ## MCP Registry (after npm)
+
 
 The `server.json` manifest and `package.json#mcpName` are versioned together.
 
@@ -47,6 +66,8 @@ mcp-publisher publish server.json
 The MCP Registry requires the npm package version to be **publicly available first** and verifies package/namespace ownership. Do not claim discoverability before the publish command succeeds. After npm is live, run the `Publish official MCP Registry` GitHub Action with the exact released npm version. It checks the package first and uses GitHub OIDC, without storing credentials.
 
 Official guide: [Publish an MCP server](https://github.com/modelcontextprotocol/registry/blob/main/docs/modelcontextprotocol-io/quickstart.mdx).
+
+The repository also has a manually triggered GitHub Actions workflow named Publish MCP Registry. Once npm version 0.3.2 exists, trigger it with version 0.3.2. The workflow checks public npm metadata, validates server.json and authenticates to the registry using GitHub Actions OIDC. It does not require a registry token copied to a chat.
 
 ## After releasing
 

@@ -14,6 +14,10 @@ We want to know where Reddit MCP Publisher works, where setup is confusing, and 
 
 Never share login cookies, 2FA details, browser profiles, private DM text, raw auth headers, private VNC endpoints, or personal information. Redact usernames and subreddit names when appropriate. Make clear whether a published post was removed after submission.
 
+## Maintainer test
+
+A [live Reddit browser-preview check](demo-live.md) from 2 November 2026 records a form preview and a read-only r/test rules lookup. It is clearly labelled as a **maintainer test**. No new Reddit post was submitted for the demo; no independent user adoption is claimed.
+
 ## Current examples
 
 There are no independently verified user case studies linked here yet. The [README demo](../README.md#see-the-workflow) is illustrative. As public, permissioned reports arrive, we can link them here with the outcome (including failures), the environment, and a date. Maintainer testing must be identified separately.
