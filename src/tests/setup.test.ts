@@ -55,7 +55,7 @@ test("generated systemd services keep VNC local-only and bind daemon to setup st
 test("MCP config generators point clients at the stable local stdio process", () => {
   const configs = buildMcpConfigs("/runtime/reddit-mcp-publisher", "/state/reddit-agent-publisher");
   assert.match(configs.codex, /mcp_servers\.reddit-mcp-publisher/);
-  assert.match(configs.codex, /\/runtime\/reddit-agent-publisher\/dist\/mcp\.js/);
+  assert.match(configs.codex, /\/runtime\/reddit-mcp-publisher\/dist\/mcp\.js/);
   const generic = JSON.parse(configs.generic);
   assert.equal(generic.mcpServers["reddit-mcp-publisher"].args[0], "/runtime/reddit-mcp-publisher/dist/mcp.js");
   assert.equal(generic.mcpServers["reddit-mcp-publisher"].env.PUBLISHER_STATE_DIR, "/state/reddit-agent-publisher");
