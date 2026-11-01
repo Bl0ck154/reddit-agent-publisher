@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.3.2 - 2026-11-02
+
+### Distribution fixes
+- Install native npm modules in the stable runtime and verify the SQLite binding before reporting success.
+- Exercise packaged SQLite during CI and release smoke checks, rather than testing only CLI help.
+- Pin npm publication to an existing version tag and add a GitHub OIDC workflow for official MCP Registry publication.
+
+
 ## 0.3.1 - 2026-11-02
 
 ### Branding and compatibility

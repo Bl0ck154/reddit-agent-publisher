@@ -15,7 +15,7 @@ The `release.yml` workflow runs on tags `v*`. It checks the tag against package/
 
 ```bash
 git checkout main && git pull --ff-only
-git tag v0.3.1
+git tag v0.3.2
 git push origin v0.3.1
 ```
 
@@ -30,7 +30,7 @@ As of 2026-11-02 the public `reddit-mcp-publisher` package returns npm E404 and 
 3. Run `npm publish --access public` from that trusted machine (may require interactive 2FA). Never paste tokens into GitHub issues.
 4. Confirm `npm view reddit-mcp-publisher version`, then test `npx -y reddit-mcp-publisher --help` and setup in a disposable environment.
 
-After the first publication, configure **npm Trusted Publishing** under the package settings for GitHub owner `Bl0ck154`, repository `reddit-mcp-publisher`, workflow filename `publish-npm.yml` with permission to publish. The manually dispatched `publish-npm.yml` workflow uses GitHub Actions OIDC with Node 24/npm 11+; it refuses mismatched versions. It is intentionally not automatic on every git tag because registry access and ownership must be established first.
+After the first publication, configure **npm Trusted Publishing** under the package settings for GitHub owner `Bl0ck154`, repository `reddit-mcp-publisher`, workflow filename `publish-npm.yml` with permission to publish. The manually dispatched `publish-npm.yml` workflow uses GitHub Actions OIDC with Node 24/npm 11+; it refuses mismatched versions. It is intentionally not automatic on every git tag because registry access and ownership must be established first. The workflow checks out the exact release tag: later changes to main cannot be published as an older version.
 
 Official guide: [npm Trusted Publishers](https://docs.npmjs.com/trusted-publishers/).
 
@@ -44,7 +44,7 @@ mcp-publisher login github
 mcp-publisher publish server.json
 ```
 
-The MCP Registry requires the npm package version to be **publicly available first** and verifies package/namespace ownership. Do not claim discoverability before the publish command succeeds. If setting this up in CI later, use `mcp-publisher login github-oidc` with `id-token: write`.
+The MCP Registry requires the npm package version to be **publicly available first** and verifies package/namespace ownership. Do not claim discoverability before the publish command succeeds. After npm is live, run the `Publish official MCP Registry` GitHub Action with the exact released npm version. It checks the package first and uses GitHub OIDC, without storing credentials.
 
 Official guide: [Publish an MCP server](https://github.com/modelcontextprotocol/registry/blob/main/docs/modelcontextprotocol-io/quickstart.mdx).
 

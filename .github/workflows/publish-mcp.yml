@@ -1,0 +1,59 @@
+name: Publish official MCP Registry
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Exact published npm version"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: reddit-mcp-registry-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: v${{ inputs.version }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Verify package is public and metadata matches
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          import assert from "node:assert/strict";
+          const v=process.env.RELEASE_VERSION;
+          assert.match(v,/^\d+\.\d+\.\d+$/);
+          const pkg=JSON.parse(fs.readFileSync("package.json","utf8"));
+          const server=JSON.parse(fs.readFileSync("server.json","utf8"));
+          assert.equal(pkg.version,v);
+          assert.equal(server.version,v);
+          assert.equal(server.name,pkg.mcpName);
+          assert.equal(server.packages[0].identifier,pkg.name);
+          assert.equal(server.packages[0].version,v);
+          NODE
+          test "$(npm view "reddit-mcp-publisher@$RELEASE_VERSION" version)" = "$RELEASE_VERSION"
+      - name: Download verified official registry publisher
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v1.8.7 -R modelcontextprotocol/registry -p mcp-publisher_linux_amd64.tar.gz
+          echo "00b21004149a4ce66f0782508ae4a2bce67d1bea395a8da0bd8028159fb59579  mcp-publisher_linux_amd64.tar.gz" | sha256sum --check
+          tar -xzf mcp-publisher_linux_amd64.tar.gz mcp-publisher
+          chmod +x mcp-publisher
+      - name: Validate and publish to the official registry
+        run: |
+          ./mcp-publisher validate server.json
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish server.json
