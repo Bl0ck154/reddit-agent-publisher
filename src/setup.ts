@@ -52,8 +52,11 @@ function installRuntime(root:string,stateDir:string):RuntimeInstall {
   const tmp=path.join(stateDir,"tmp","setup-pack"),prefix=path.join(stateDir,"runtime"); fs.rmSync(tmp,{recursive:true,force:true}); fs.mkdirSync(tmp,{recursive:true,mode:0o700}); fs.mkdirSync(prefix,{recursive:true,mode:0o700});
   const pack=spawnSync(npm,["pack",root,"--ignore-scripts","--pack-destination",tmp],{encoding:"utf8",stdio:["ignore","pipe","pipe"]});
   const archiveName=String(pack.stdout??"").split(/\r?\n/).map(x=>x.trim()).filter(Boolean).at(-1); if(pack.status!==0||!archiveName)return{packageRoot:root,stable:false,warning:`Could not pack stable runtime: ${String(pack.stderr??"npm pack failed").trim()}`};
-  const install=spawnSync(npm,["install","--prefix",prefix,"--omit=dev","--no-audit","--no-fund","--ignore-scripts",path.join(tmp,archiveName)],{encoding:"utf8",stdio:["ignore","pipe","pipe"]});
+  const install=spawnSync(npm,["install","--prefix",prefix,"--omit=dev","--no-audit","--no-fund",path.join(tmp,archiveName)],{encoding:"utf8",stdio:["ignore","pipe","pipe"]});
   const installed=path.join(prefix,"node_modules",PACKAGE_NAME); if(install.status!==0||!fs.existsSync(path.join(installed,"dist","daemon.js")))return{packageRoot:root,stable:false,warning:`Could not install stable runtime: ${String(install.stderr??"runtime install failed").trim()}`};
+  // A native SQLite binding must load before this runtime can be used.
+  const verify=spawnSync(process.execPath,["-e","const D=require(process.argv[1]); const db=new D(':memory:'); db.close()",path.join(prefix,"node_modules","better-sqlite3")],{encoding:"utf8",stdio:["ignore","pipe","pipe"]});
+  if(verify.status!==0)return{packageRoot:root,stable:false,warning:`Installed runtime could not load native SQLite: ${String(verify.stderr??"native binding unavailable").trim()}`};
   fs.rmSync(tmp,{recursive:true,force:true}); return{packageRoot:installed,stable:true};
 }
 

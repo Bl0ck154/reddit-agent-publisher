@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -33,6 +33,7 @@ jobs:
         run: |
           mkdir -p /tmp/publisher-pack /tmp/publisher-install
           ARCHIVE="$(npm pack --ignore-scripts --pack-destination /tmp/publisher-pack --silent | tail -n 1)"
-          npm install --prefix /tmp/publisher-install --ignore-scripts --no-audit --no-fund "/tmp/publisher-pack/$ARCHIVE"
+          npm install --prefix /tmp/publisher-install --no-audit --no-fund "/tmp/publisher-pack/$ARCHIVE"
           /tmp/publisher-install/node_modules/.bin/reddit-mcp-publisher --help | grep -q "setup"
           /tmp/publisher-install/node_modules/.bin/reddit-agent-publisher --help | grep -q "setup"
+          node -e 'const D=require("/tmp/publisher-install/node_modules/better-sqlite3"); const db=new D(":memory:"); db.close()'

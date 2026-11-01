@@ -1,6 +1,6 @@
 {
   "name": "reddit-mcp-publisher",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Reddit MCP server with lightweight LightPanda reads, Chrome previews and owner-approved publishing.",
   "type": "module",
   "bin": {
