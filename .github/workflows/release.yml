@@ -1,0 +1,52 @@
+name: GitHub Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - name: Verify all version fields match tag
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          import assert from "node:assert/strict";
+          const version = process.env.RELEASE_TAG.replace(/^v/, "");
+          assert.match(process.env.RELEASE_TAG, /^v\d+\.\d+\.\d+$/);
+          const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+          const lock = JSON.parse(fs.readFileSync("package-lock.json", "utf8"));
+          const registry = JSON.parse(fs.readFileSync("server.json", "utf8"));
+          assert.equal(pkg.version, version);
+          assert.equal(lock.version, version);
+          assert.equal(lock.packages[""].version, version);
+          assert.equal(registry.version, version);
+          assert.equal(registry.packages[0].version, version);
+          assert.equal(pkg.mcpName, registry.name);
+          assert.match(fs.readFileSync("src/cli.ts", "utf8"), new RegExp('\\.version\\("'+version.replace(/\./g,"\\.")+'"\\)'));
+          NODE
+      - run: npm ci
+      - run: npm run check
+      - name: Pack and check installation entry point
+        run: |
+          mkdir -p "$RUNNER_TEMP/pack" "$RUNNER_TEMP/install"
+          ARCHIVE="$(npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/pack" --silent | tail -n 1)"
+          npm install --prefix "$RUNNER_TEMP/install" --ignore-scripts --no-audit --no-fund "$RUNNER_TEMP/pack/$ARCHIVE"
+          "$RUNNER_TEMP/install/node_modules/.bin/reddit-agent-publisher" --help | grep -q 'setup'
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release create "$RELEASE_TAG" --verify-tag --generate-notes --title "$RELEASE_TAG"

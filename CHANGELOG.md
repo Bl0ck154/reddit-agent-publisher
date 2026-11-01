@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.3.0 - 2026-11-01
+
+### Distribution
+
+- Shortened README with an illustrative preview-to-publish walkthrough and linked deep-dive documentation.
+- Added installation, release, community evidence, and MCP Registry publishing guides.
+- Added npm/MCP Registry metadata, release validation workflows, and a user experience issue template.
+- Version aligned across package manifest, lockfile, CLI, and MCP Registry manifest; npm and MCP publishing still require separate verification.
+
 ### Added
 
 - one-command `reddit-agent-publisher setup` bootstrap for secure local/self-hosted installs
