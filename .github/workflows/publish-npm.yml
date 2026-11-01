@@ -1,0 +1,36 @@
+name: Publish npm (owner initiated)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Exact package version to publish; package must already be claimed on npm"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  npm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Verify version and GitHub release
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node --input-type=module -e 'import fs from "node:fs"; import assert from "node:assert/strict"; const pkg=JSON.parse(fs.readFileSync("package.json")); const lock=JSON.parse(fs.readFileSync("package-lock.json")); const v=process.env.RELEASE_VERSION; assert.match(v,/^\d+\.\d+\.\d+$/); assert.equal(pkg.version,v); assert.equal(lock.version,v);'
+          gh release view "v$RELEASE_VERSION" --json tagName --jq .tagName | grep -Fx "v$RELEASE_VERSION"
+      - run: npm ci
+      - run: npm run check
+      - run: npm publish --access public

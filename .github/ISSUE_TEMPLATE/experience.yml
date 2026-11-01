@@ -1,0 +1,50 @@
+name: Usage report / case study
+description: Share a real, sanitized success, partial success, or failure
+title: "[Experience] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for trying Reddit Agent Publisher. Report actual results only.
+        Do not upload cookies, credentials, private messages, login screenshots, or personal data.
+  - type: dropdown
+    id: outcome
+    attributes:
+      label: Outcome
+      options:
+        - Worked
+        - Partially worked
+        - Blocked by Reddit permissions or subreddit rules
+        - Failed
+        - Not yet tested
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: Environment
+      description: OS, Node, browser, desktop/VPS, MCP client as applicable
+      placeholder: e.g. Ubuntu, Node 22, Chromium, Codex, local session
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: What did you try?
+      description: Describe the actual steps and result. Redact identifying data.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Optional public evidence
+      description: Public permalink, sanitized screenshot, or an error code (no secrets)
+    validations:
+      required: false
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: What should change?
+    validations:
+      required: false

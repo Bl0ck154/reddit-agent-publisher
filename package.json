@@ -1,6 +1,6 @@
 {
   "name": "reddit-agent-publisher",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Let AI agents publish to Reddit through real browser sessions, with live previews and explicit human approval.",
   "type": "module",
   "bin": {
@@ -62,5 +62,9 @@
   "bugs": {
     "url": "https://github.com/Bl0ck154/reddit-agent-publisher/issues"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "mcpName": "io.github.bl0ck154/reddit-agent-publisher",
+  "publishConfig": {
+    "access": "public"
+  }
 }

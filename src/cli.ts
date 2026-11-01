@@ -8,7 +8,7 @@ import { loadConfig } from "./config.js";
 import { rpc } from "./rpc.js";
 import { runSetup, type SetupClient, type SetupMode } from "./setup.js";
 
-const program = new Command().name("reddit-agent-publisher").description("Owner-approved Reddit publishing CLI").version("0.2.0");
+const program = new Command().name("reddit-agent-publisher").description("Owner-approved Reddit publishing CLI").version("0.3.0");
 const config = loadConfig();
 const out = (x: unknown) => { process.stdout.write(`${JSON.stringify(x, null, 2)}\n`); if ((x as any)?.ok === false) process.exitCode = 1; };
 const call = async (method: string, params: any = {}) => out(await rpc(config.socketPath, method, { ...params, actor: "cli" }));
