@@ -216,6 +216,12 @@ export function classifyRedditListingModeration(payload: unknown, expectedFullna
   return {status:"UNKNOWN",reason:"no_explicit_moderation_flag"};
 }
 
+export function redditPostListingPath(subreddit:string, postId:string):string {
+  if(!/^[A-Za-z0-9_]{2,21}$/.test(subreddit)||!/^[a-z0-9]+$/i.test(postId))
+    throw new Error("Invalid Reddit post identity");
+  return "/r/"+encodeURIComponent(subreddit)+"/comments/"+encodeURIComponent(postId)+".json?raw_json=1&limit=1&depth=0";
+}
+
 export function redditMediaFilesMatch(expected: Array<{name:string;size:number}>, selected: Array<{name:string;size:number}>): boolean {
   return expected.length > 0 && expected.length === selected.length &&
     expected.every((file,index)=>file.name===selected[index]?.name && file.size===selected[index]?.size);
@@ -691,36 +697,50 @@ export class RedditBrowserAdapter implements Adapter {
 
   async publicationVisibility(account: string, canonicalUrl: string): Promise<{status:RedditVisibilityStatus;reason:string;checked_at:string}> {
     const id=this.permalink(canonicalUrl);
-    if (id.commentId) throw new Error("VISIBILITY_UNSUPPORTED: post status needs a post permalink");
-    const page=await this.page(account,true);
-    try {
-      await this.gotoRetry(page,id.permalink);
-      this.assertOrigin(page.url());
-      const gate=await this.gate(page);
-      if (gate) return {status:"UNKNOWN",reason:"authentication_or_network_gate",checked_at:new Date().toISOString()};
-      const post=page.locator('shreddit-post[thingid="'+id.fullname+'"],shreddit-post[id="'+id.fullname+'"]');
-      const found=await post.count()===1;
-      const postText=found ? await post.first().innerText().catch(()=>"") : "";
-      // The post may be hidden behind a moderation banner outside the post element.
-      const mainText=(await page.locator("main").first().innerText().catch(()=>"")).slice(0,2500);
-      const explicitNotice=classifyRedditPostVisibility(postText,false);
-      const bannerNotice=classifyRedditPostVisibility(mainText.slice(0,1200),false);
-      let listing:unknown;
+    if(id.commentId) throw new Error("VISIBILITY_UNSUPPORTED: post status needs a post permalink");
+    type Check = {status:RedditVisibilityStatus;reason:string;checked_at:string;backend:"chrome"|"obscura"|"lightpanda"};
+    const inspect=async(forceChrome:boolean):Promise<Check>=>{
+      let page:Page|undefined;
+      let backend:Check["backend"]=forceChrome?"chrome":(this.config.redditBrowser??"chrome");
       try {
-        listing=await page.evaluate(async(url)=>{
-          const response=await fetch(url,{credentials:"include",headers:{Accept:"application/json"}});
-          return response.ok ? await response.json() : undefined;
-        },id.permalink+"?raw_json=1");
-      } catch { /* Missing Reddit listing data does not prove that a post is visible. */ }
-      const listingSignal=classifyRedditListingModeration(listing,id.fullname);
-      const result=listingSignal.status!=="UNKNOWN" ? listingSignal :
-        explicitNotice.status!=="UNKNOWN" ? explicitNotice :
-        bannerNotice.status==="REMOVED" || bannerNotice.status==="PENDING_REVIEW" || bannerNotice.status==="DELETED" ? bannerNotice :
-        classifyRedditPostVisibility(postText,found);
-      return {...result,checked_at:new Date().toISOString()};
-    } finally {
-      await this.releasePage(page,account);
+        page=await this.page(account,true,forceChrome);
+        backend=this.pageBackends.get(page)??"chrome";
+        await this.gotoRetry(page,id.permalink);
+        this.assertOrigin(page.url());
+        const gate=await this.gate(page);
+        if(gate) return {status:"UNKNOWN",reason:"authentication_or_network_gate",checked_at:new Date().toISOString(),backend};
+        const post=page.locator('shreddit-post[thingid="'+id.fullname+'"],shreddit-post[id="'+id.fullname+'"]');
+        const found=await post.count()===1;
+        const postText=found ? await post.first().innerText().catch(()=>"") : "";
+        const mainText=(await page.locator("main").first().innerText().catch(()=>"")).slice(0,2500);
+        const explicitNotice=classifyRedditPostVisibility(postText,false);
+        const bannerNotice=classifyRedditPostVisibility(mainText.slice(0,1200),false);
+        let listing:unknown;
+        try {
+          listing=await page.evaluate(async(endpoint)=>{
+            const response=await fetch(endpoint,{credentials:"include",headers:{Accept:"application/json"}});
+            return response.ok ? await response.json() : undefined;
+          },redditPostListingPath(id.subreddit,id.postId));
+        } catch { /* Listing unavailable: never infer that this means the post is public. */ }
+        const listingSignal=classifyRedditListingModeration(listing,id.fullname);
+        const result=listingSignal.status!=="UNKNOWN" ? listingSignal :
+          explicitNotice.status!=="UNKNOWN" ? explicitNotice :
+          bannerNotice.status==="REMOVED" || bannerNotice.status==="PENDING_REVIEW" || bannerNotice.status==="DELETED" ? bannerNotice :
+          classifyRedditPostVisibility(postText,found);
+        return {...result,checked_at:new Date().toISOString(),backend};
+      } catch {
+        return {status:"UNKNOWN",reason:"visibility_read_unavailable",checked_at:new Date().toISOString(),backend};
+      } finally {
+        if(page) await this.releasePage(page,account).catch(()=>undefined);
+      }
+    };
+    const first=await inspect(false);
+    if(first.backend==="chrome" || ["REMOVED","PENDING_REVIEW","DELETED"].includes(first.status)) {
+      const {backend:ignored,...publicResult}=first;return publicResult;
     }
+    const second=await inspect(true);
+    const chosen=second.status!=="UNKNOWN" ? second : first;
+    const {backend:ignored,...publicResult}=chosen;return publicResult;
   }
 
   async diagnose(live: boolean): Promise<Record<string, unknown>> {
