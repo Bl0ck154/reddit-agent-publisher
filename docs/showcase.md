@@ -1,10 +1,10 @@
 # Real-world examples and feedback
 
-We want to know where Reddit Agent Publisher works, where setup is confusing, and where it fails. A screenshot of an approved preview, a public permalink, or a sanitized error is more useful than an anonymous endorsement. Do not post anything on Reddit just to create evidence for this project.
+We want to know where Reddit MCP Publisher works, where setup is confusing, and where it fails. A screenshot of an approved preview, a public permalink, or a sanitized error is more useful than an anonymous endorsement. Do not post anything on Reddit just to create evidence for this project.
 
 ## Submit a case study
 
-[Open an experience report](https://github.com/Bl0ck154/reddit-agent-publisher/issues/new?template=experience.yml) and include:
+[Open an experience report](https://github.com/Bl0ck154/reddit-mcp-publisher/issues/new?template=experience.yml) and include:
 
 - **Environment:** OS, Node version, Chrome/Chromium, local desktop or VPS, and the MCP client if used
 - **Goal:** what you actually tried (reading rules, previewing a draft, posting, Chat/DM, etc.)

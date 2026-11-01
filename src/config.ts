@@ -42,7 +42,7 @@ export function loadConfig(): Config {
     socketPath: process.env.PUBLISHER_SOCKET ?? file.socketPath ?? path.join(stateDir, "publisher.sock"),
     chromePath: process.env.PUBLISHER_CHROME ?? file.chromePath ?? "/opt/google/chrome/google-chrome",
     lightpandaPath: process.env.PUBLISHER_LIGHTPANDA ?? file.lightpandaPath ?? "lightpanda",
-    redditBrowser: ["chrome", "lightpanda"].includes(String(process.env.PUBLISHER_REDDIT_BROWSER ?? file.redditBrowser ?? "chrome")) ? String(process.env.PUBLISHER_REDDIT_BROWSER ?? file.redditBrowser ?? "chrome") as "chrome" | "lightpanda" : "chrome",
+    redditBrowser: ["chrome", "lightpanda"].includes(String(process.env.PUBLISHER_REDDIT_BROWSER ?? file.redditBrowser ?? "lightpanda")) ? String(process.env.PUBLISHER_REDDIT_BROWSER ?? file.redditBrowser ?? "lightpanda") as "chrome" | "lightpanda" : "chrome",
     display: process.env.DISPLAY ?? file.display ?? ":98",
     approvalTtlSeconds: Number(file.approvalTtlSeconds ?? 900),
     mutationCooldownSeconds: Number(file.mutationCooldownSeconds ?? 15),

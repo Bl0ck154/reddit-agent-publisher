@@ -1,9 +1,10 @@
 {
-  "name": "reddit-agent-publisher",
-  "version": "0.3.0",
-  "description": "Let AI agents publish to Reddit through real browser sessions, with live previews and explicit human approval.",
+  "name": "reddit-mcp-publisher",
+  "version": "0.3.1",
+  "description": "Reddit MCP server with lightweight LightPanda reads, Chrome previews and owner-approved publishing.",
   "type": "module",
   "bin": {
+    "reddit-mcp-publisher": "dist/cli.js",
     "reddit-agent-publisher": "dist/cli.js",
     "pubctl": "dist/cli.js",
     "publisher-mcp": "dist/mcp.js",
@@ -46,24 +47,29 @@
     "node": ">=22"
   },
   "keywords": [
+    "reddit-mcp",
+    "mcp-server",
+    "lightpanda",
+    "reddit-automation",
+    "browser-automation",
+    "self-hosted",
     "reddit",
     "ai-agents",
     "chatgpt",
     "mcp",
     "playwright",
-    "browser-automation",
     "human-in-the-loop"
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Bl0ck154/reddit-agent-publisher.git"
+    "url": "git+https://github.com/Bl0ck154/reddit-mcp-publisher.git"
   },
-  "homepage": "https://github.com/Bl0ck154/reddit-agent-publisher#readme",
+  "homepage": "https://github.com/Bl0ck154/reddit-mcp-publisher#readme",
   "bugs": {
-    "url": "https://github.com/Bl0ck154/reddit-agent-publisher/issues"
+    "url": "https://github.com/Bl0ck154/reddit-mcp-publisher/issues"
   },
   "license": "MIT",
-  "mcpName": "io.github.bl0ck154/reddit-agent-publisher",
+  "mcpName": "io.github.bl0ck154/reddit-mcp-publisher",
   "publishConfig": {
     "access": "public"
   }

@@ -9,7 +9,7 @@ Requirements: **Node.js 22+**, npm, and Chrome/Chromium.
 ### One-command setup from GitHub
 
 ```bash
-npx -y github:Bl0ck154/reddit-agent-publisher setup
+npx -y github:Bl0ck154/reddit-mcp-publisher setup
 ```
 
 The installer detects the machine type and does the repetitive setup for you:
@@ -28,14 +28,14 @@ The installer detects the machine type and does the repetitive setup for you:
 Useful variants:
 
 ```bash
-npx -y github:Bl0ck154/reddit-agent-publisher setup --client codex
-npx -y github:Bl0ck154/reddit-agent-publisher setup --mode server --client claude
+npx -y github:Bl0ck154/reddit-mcp-publisher setup --client codex
+npx -y github:Bl0ck154/reddit-mcp-publisher setup --mode server --client claude
 ```
 
 After an npm registry release, the shorter equivalent is:
 
 ```bash
-npx -y reddit-agent-publisher setup
+npx -y reddit-mcp-publisher setup
 ```
 
 Setup is safe to rerun: it keeps the existing master key and persistent Chrome profile instead of silently replacing them.
@@ -50,15 +50,15 @@ ssh -N -L 5901:127.0.0.1:5901 YOUR_USER@YOUR_SERVER
 
 Then connect a VNC viewer to `localhost:5901` and complete Reddit login in Chrome once. Setup does not use `sudo` or install operating-system packages behind your back.
 
-See [Browser modes](../docs/browser-modes.md) for desktop, VPS, and manual deployment details.
+See [Browser modes](browser-modes.md) for desktop, VPS, and manual deployment details.
 
 ### Manual/source setup
 
 The old explicit path remains available for advanced deployments:
 
 ```bash
-git clone https://github.com/Bl0ck154/reddit-agent-publisher.git
-cd reddit-agent-publisher
+git clone https://github.com/Bl0ck154/reddit-mcp-publisher.git
+cd reddit-mcp-publisher
 npm ci
 npm run build
 node dist/cli.js setup
@@ -67,22 +67,22 @@ node dist/cli.js setup
 After setup, normal CLI commands include:
 
 ```bash
-reddit-agent-publisher status
-reddit-agent-publisher reddit-activity --limit 10
-reddit-agent-publisher reddit-preflight GiftofGames --action comment
-reddit-agent-publisher reddit-inbox
+reddit-mcp-publisher status
+reddit-mcp-publisher reddit-activity --limit 10
+reddit-mcp-publisher reddit-preflight GiftofGames --action comment
+reddit-mcp-publisher reddit-inbox
 ```
 
 
 ## After setup
 
 1. Complete Reddit login in the browser controlled by the account owner.
-2. Run `reddit-agent-publisher status` and confirm the intended account is authenticated.
-3. Run `reddit-agent-publisher reddit-preflight <subreddit>` before writing.
+2. Run `reddit-mcp-publisher status` and confirm the intended account is authenticated.
+3. Run `reddit-mcp-publisher reddit-preflight <subreddit>` before writing.
 4. Ask your MCP client to prepare a draft, inspect the live preview, and approve an exact publish when ready.
 
 If the CLI is not on your PATH after the one-off `npx` setup, use the generated MCP config or the CLI under your installed runtime. See [browser modes](browser-modes.md).
 
 ## Distribution status
 
-The GitHub source installer works independently of the npm registry. Do **not** use `npx -y reddit-agent-publisher setup` until this package appears on [npm](https://www.npmjs.com/package/reddit-agent-publisher). After its first successful npm release, that shorter command will become the recommended install path.
+The GitHub source installer works independently of the npm registry. Do **not** use `npx -y reddit-mcp-publisher setup` until this package appears on [npm](https://www.npmjs.com/package/reddit-mcp-publisher). After its first successful npm release, that shorter command will become the recommended install path.

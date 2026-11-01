@@ -1,6 +1,6 @@
 # ChatGPT / Custom GPT Actions
 
-Reddit Agent Publisher includes a real HTTP Actions gateway in `src/actions-gateway.ts`. It exposes a narrow Reddit context + publishing workflow, not arbitrary browser or RPC access.
+Reddit MCP Publisher includes a real HTTP Actions gateway in `src/actions-gateway.ts`. It exposes a narrow Reddit context + publishing workflow, not arbitrary browser or RPC access.
 
 ## Workflow
 

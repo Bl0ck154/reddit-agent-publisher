@@ -13,7 +13,8 @@ export interface SetupOptions { mode?:SetupMode; client?:SetupClient; account?:s
 type RuntimeInstall={packageRoot:string;stable:boolean;warning?:string};
 type SystemdInstall={installed:boolean;serverDesktop:boolean;vncAvailable:boolean;warning?:string};
 
-const NAME="reddit-agent-publisher";
+const NAME="reddit-agent-publisher"; // Keep legacy state and service paths for existing installs.
+const PACKAGE_NAME="reddit-mcp-publisher";
 const BROWSER_SERVICE="reddit-agent-publisher-browser";
 const DAEMON_SERVICE="reddit-agent-publisher.service";
 const XVFB_SERVICE="reddit-agent-publisher-xvfb.service";
@@ -52,7 +53,7 @@ function installRuntime(root:string,stateDir:string):RuntimeInstall {
   const pack=spawnSync(npm,["pack",root,"--ignore-scripts","--pack-destination",tmp],{encoding:"utf8",stdio:["ignore","pipe","pipe"]});
   const archiveName=String(pack.stdout??"").split(/\r?\n/).map(x=>x.trim()).filter(Boolean).at(-1); if(pack.status!==0||!archiveName)return{packageRoot:root,stable:false,warning:`Could not pack stable runtime: ${String(pack.stderr??"npm pack failed").trim()}`};
   const install=spawnSync(npm,["install","--prefix",prefix,"--omit=dev","--no-audit","--no-fund","--ignore-scripts",path.join(tmp,archiveName)],{encoding:"utf8",stdio:["ignore","pipe","pipe"]});
-  const installed=path.join(prefix,"node_modules",NAME); if(install.status!==0||!fs.existsSync(path.join(installed,"dist","daemon.js")))return{packageRoot:root,stable:false,warning:`Could not install stable runtime: ${String(install.stderr??"runtime install failed").trim()}`};
+  const installed=path.join(prefix,"node_modules",PACKAGE_NAME); if(install.status!==0||!fs.existsSync(path.join(installed,"dist","daemon.js")))return{packageRoot:root,stable:false,warning:`Could not install stable runtime: ${String(install.stderr??"runtime install failed").trim()}`};
   fs.rmSync(tmp,{recursive:true,force:true}); return{packageRoot:installed,stable:true};
 }
 
@@ -61,11 +62,11 @@ function env(name:string,value:string):string{return `Environment=${q(`${name}=$
 export function renderSystemdUnits(a:{runtimeRoot:string;stateDir:string;keyPath:string;chromePath:string;display:string;serverMode:boolean;xvfbPath?:string;x11vncPath?:string}):Record<string,string>{
   const needs=a.serverMode&&a.xvfbPath?`Requires=${XVFB_SERVICE}\nAfter=${XVFB_SERVICE}\n`:"";
   const units:Record<string,string>={
-    [DAEMON_SERVICE]:`[Unit]\nDescription=Reddit Agent Publisher daemon\nAfter=network.target\n\n[Service]\nType=simple\n${env("PUBLISHER_STATE_DIR",a.stateDir)}\n${env("PUBLISHER_MASTER_KEY_FILE",a.keyPath)}\nExecStart=${q(process.execPath)} ${q(path.join(a.runtimeRoot,"dist","daemon.js"))}\nRestart=on-failure\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`,
-    [`${BROWSER_SERVICE}@.service`]:`[Unit]\nDescription=Reddit Agent Publisher browser (%i)\n${needs}\n[Service]\nType=simple\n${env("PUBLISHER_STATE_DIR",a.stateDir)}\n${env("PUBLISHER_CHROME",a.chromePath)}\n${env("DISPLAY",a.display)}\nPassEnvironment=WAYLAND_DISPLAY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS\nExecStart=/bin/sh ${q(path.join(a.runtimeRoot,"bin","start-browser"))} %i\nRestart=no\nTimeoutStopSec=10\n`
+    [DAEMON_SERVICE]:`[Unit]\nDescription=Reddit MCP Publisher daemon\nAfter=network.target\n\n[Service]\nType=simple\n${env("PUBLISHER_STATE_DIR",a.stateDir)}\n${env("PUBLISHER_MASTER_KEY_FILE",a.keyPath)}\nExecStart=${q(process.execPath)} ${q(path.join(a.runtimeRoot,"dist","daemon.js"))}\nRestart=on-failure\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`,
+    [`${BROWSER_SERVICE}@.service`]:`[Unit]\nDescription=Reddit MCP Publisher browser (%i)\n${needs}\n[Service]\nType=simple\n${env("PUBLISHER_STATE_DIR",a.stateDir)}\n${env("PUBLISHER_CHROME",a.chromePath)}\n${env("DISPLAY",a.display)}\nPassEnvironment=WAYLAND_DISPLAY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS\nExecStart=/bin/sh ${q(path.join(a.runtimeRoot,"bin","start-browser"))} %i\nRestart=no\nTimeoutStopSec=10\n`
   };
-  if(a.serverMode&&a.xvfbPath)units[XVFB_SERVICE]=`[Unit]\nDescription=Reddit Agent Publisher private Xvfb desktop\n\n[Service]\nType=simple\nExecStart=${q(a.xvfbPath)} ${a.display} -screen 0 1440x900x24 -nolisten tcp\nRestart=on-failure\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
-  if(a.serverMode&&a.xvfbPath&&a.x11vncPath)units[VNC_SERVICE]=`[Unit]\nDescription=Reddit Agent Publisher localhost-only VNC\nRequires=${XVFB_SERVICE}\nAfter=${XVFB_SERVICE}\n\n[Service]\nType=simple\nExecStart=${q(a.x11vncPath)} -display ${a.display} -localhost -forever -shared -nopw -rfbport 5901\nRestart=on-failure\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
+  if(a.serverMode&&a.xvfbPath)units[XVFB_SERVICE]=`[Unit]\nDescription=Reddit MCP Publisher private Xvfb desktop\n\n[Service]\nType=simple\nExecStart=${q(a.xvfbPath)} ${a.display} -screen 0 1440x900x24 -nolisten tcp\nRestart=on-failure\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
+  if(a.serverMode&&a.xvfbPath&&a.x11vncPath)units[VNC_SERVICE]=`[Unit]\nDescription=Reddit MCP Publisher localhost-only VNC\nRequires=${XVFB_SERVICE}\nAfter=${XVFB_SERVICE}\n\n[Service]\nType=simple\nExecStart=${q(a.x11vncPath)} -display ${a.display} -localhost -forever -shared -nopw -rfbport 5901\nRestart=on-failure\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n`;
   return units;
 }
 function systemdEnv():NodeJS.ProcessEnv{const uid=typeof process.getuid==="function"?process.getuid():1000,runtime=process.env.XDG_RUNTIME_DIR??`/run/user/${uid}`;return{...process.env,XDG_RUNTIME_DIR:runtime,DBUS_SESSION_BUS_ADDRESS:process.env.DBUS_SESSION_BUS_ADDRESS??`unix:path=${runtime}/bus`};}
@@ -87,9 +88,9 @@ async function waitSocket(p:string,ms=8000):Promise<boolean>{const end=Date.now(
 
 export function buildMcpConfigs(runtimeRoot:string,stateDir:string):Record<SetupClient,string>{
   const command=process.execPath,mcpPath=path.join(runtimeRoot,"dist","mcp.js"),environment={PUBLISHER_STATE_DIR:stateDir};
-  const generic=JSON.stringify({mcpServers:{"reddit-agent-publisher":{command,args:[mcpPath],env:environment}}},null,2);
-  const opencode=JSON.stringify({mcp:{"reddit-agent-publisher":{type:"local",command:[command,mcpPath],enabled:true,environment}}},null,2);
-  const codex=`[mcp_servers.reddit-agent-publisher]\ncommand = ${JSON.stringify(command)}\nargs = [${JSON.stringify(mcpPath)}]\nenv = { PUBLISHER_STATE_DIR = ${JSON.stringify(stateDir)} }\n`;
+  const generic=JSON.stringify({mcpServers:{"reddit-mcp-publisher":{command,args:[mcpPath],env:environment}}},null,2);
+  const opencode=JSON.stringify({mcp:{"reddit-mcp-publisher":{type:"local",command:[command,mcpPath],enabled:true,environment}}},null,2);
+  const codex=`[mcp_servers.reddit-mcp-publisher]\ncommand = ${JSON.stringify(command)}\nargs = [${JSON.stringify(mcpPath)}]\nenv = { PUBLISHER_STATE_DIR = ${JSON.stringify(stateDir)} }\n`;
   return{codex,claude:generic,opencode,generic};
 }
 function writeMcpConfigs(runtimeRoot:string,stateDir:string):Record<SetupClient,string>{const configs=buildMcpConfigs(runtimeRoot,stateDir),dir=path.join(stateDir,"integrations"),paths={codex:path.join(dir,"codex.toml"),claude:path.join(dir,"claude-desktop.json"),opencode:path.join(dir,"opencode.json"),generic:path.join(dir,"mcp.json")};fs.mkdirSync(dir,{recursive:true,mode:0o700});for(const k of Object.keys(configs)as SetupClient[])fs.writeFileSync(paths[k],`${configs[k].trim()}\n`,{mode:0o600});return paths;}
@@ -99,7 +100,7 @@ async function login(socketPath:string,account:string,interactive:boolean):Promi
 
 export async function runSetup(o:SetupOptions={}):Promise<void>{
   const stateDir=path.resolve(o.stateDir??defaultStateDir()),account=sanitizeAccountId(o.account??"owner-main"),mode=resolveSetupMode(o.mode??"auto"),serverMode=mode==="server",chrome=detectChrome();if(!chrome)throw new Error("Chrome/Chromium was not found. Install it or set PUBLISHER_CHROME, then rerun setup.");
-  process.stderr.write(`Reddit Agent Publisher setup\n\n✓ Mode: ${mode}\n✓ Chrome: ${chrome}\n`);
+  process.stderr.write(`Reddit MCP Publisher setup\n\n✓ Mode: ${mode}\n✓ Chrome: ${chrome}\n`);
   const keyPath=ensureMasterKey(stateDir),runtime=o.runtimeInstall===false?{packageRoot:sourceRoot(),stable:false}:installRuntime(sourceRoot(),stateDir),display=process.env.DISPLAY??(serverMode?":98":":0");
   process.stderr.write(`✓ Secure state: ${stateDir}\n✓ Encryption key ready\n${runtime.stable?"✓ Stable runtime installed":"• Using current runtime"}: ${runtime.packageRoot}\n`);if(runtime.warning)process.stderr.write(`  Warning: ${runtime.warning}\n`);
 

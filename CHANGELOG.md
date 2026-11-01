@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.3.1 - 2026-11-02
+
+### Branding and compatibility
+- Renamed the public GitHub project, prospective npm package and MCP Registry identity to Reddit MCP Publisher.
+- Added the new preferred CLI command with a legacy executable alias.
+- Kept existing encrypted state, browser profile paths and systemd units unchanged.
+- Preferred LightPanda for eligible Reddit reads with an authenticated snapshot while Chrome remains responsible for login, previews and writes.
+- Updated release/install documentation and CI package smoke checks.
+
+
 ## 0.3.0 - 2026-11-01
 
 ### Distribution
@@ -14,7 +24,7 @@
 ### Added
 
 - one-command `reddit-agent-publisher setup` bootstrap for secure local/self-hosted installs
-- GitHub-source `npx -y github:Bl0ck154/reddit-agent-publisher setup` entry point through the package-name executable
+- GitHub-source `npx -y github:Bl0ck154/reddit-mcp-publisher setup` entry point through the package-name executable
 - automatic Chrome/Chromium detection, persistent state/config creation, and non-rotating 32-byte master-key generation
 - stable runtime installation under the Publisher state directory so long-lived services do not depend on temporary npm cache paths
 - generated Codex, Claude Desktop, OpenCode, and generic local MCP client configs
