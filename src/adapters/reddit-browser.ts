@@ -4,7 +4,7 @@ import { type Locator, type Page } from "playwright-core";
 import type { Config } from "../config.js";
 import { RedditChat, isRedditChatRoomId } from "../reddit-chat.js";
 import { ExternalChrome } from "../external-chrome.js";
-import { ExternalRedditObscura } from "../external-reddit-obscura.js";
+import { ExternalRedditLightpanda } from "../external-reddit-lightpanda.js";
 import type { Draft } from "../types.js";
 import type { Adapter, PreviewData, PublishData } from "./base.js";
 import { PublisherError } from "../errors.js";
@@ -221,23 +221,16 @@ export function redditMediaFilesMatch(expected: Array<{name:string;size:number}>
     expected.every((file,index)=>file.name===selected[index]?.name && file.size===selected[index]?.size);
 }
 
-export function redditReadBackendOrder(preferred: Config["redditBrowser"], obscuraAvailable: boolean, lightpandaAvailable: boolean): Array<"chrome"|"obscura"|"lightpanda"> {
-  if (!preferred || preferred==="chrome") return ["chrome"];
-  const order: Array<"chrome"|"obscura"|"lightpanda">=[];
-  if (preferred==="obscura" && obscuraAvailable) order.push("obscura");
-  if (preferred==="lightpanda" && lightpandaAvailable) order.push("lightpanda");
-  if (preferred!=="obscura" && obscuraAvailable) order.push("obscura");
-  if (preferred!=="lightpanda" && lightpandaAvailable) order.push("lightpanda");
-  return [...order,"chrome"];
+export function redditReadBackendOrder(preferred: Config["redditBrowser"], lightpandaAvailable: boolean): Array<"chrome"|"lightpanda"> {
+  return preferred === "lightpanda" && lightpandaAvailable ? ["lightpanda","chrome"] : ["chrome"];
 }
 
 export class RedditBrowserAdapter implements Adapter {
   readonly id = "reddit";
   private chrome: ExternalChrome;
-  private obscura: ExternalRedditObscura;
-  private lightpanda: ExternalRedditObscura;
-  private pageBackends = new WeakMap<Page, "chrome" | "obscura" | "lightpanda">();
-  private pinnedBackends = new Map<string, "chrome" | "obscura" | "lightpanda">();
+  private lightpanda: ExternalRedditLightpanda;
+  private pageBackends = new WeakMap<Page, "chrome" | "lightpanda">();
+  private pinnedBackends = new Map<string, "chrome" | "lightpanda">();
   private browserValidated = new Set<string>();
   private browserDisabledUntil = new Map<string,number>();
   private previews = new Map<string, PreviewSession>();
@@ -248,7 +241,7 @@ export class RedditBrowserAdapter implements Adapter {
   private leanStates = new WeakMap<Page, LeanState>();
   private chat: RedditChat;
 
-  constructor(private config: Config) { this.chrome = new ExternalChrome(config, "reddit"); this.obscura = new ExternalRedditObscura(config); this.lightpanda = new ExternalRedditObscura(config, "lightpanda"); this.chat = new RedditChat(config); }
+  constructor(private config: Config) { this.chrome = new ExternalChrome(config, "reddit"); this.lightpanda = new ExternalRedditLightpanda(config); this.chat = new RedditChat(config); }
 
   async validate(d: Draft): Promise<void> {
     if (d.action === "create_post") {
@@ -585,7 +578,7 @@ export class RedditBrowserAdapter implements Adapter {
       const media=this.chatMediaFile(d);
       return { summary: { backend:"reddit-matrix", action:d.action, account:d.account, target:{recipient_username:recipient.username,recipient_fullname:recipient.fullname,matrix_user_id:recipient.matrix_user_id,existing_room_id:recipient.existing_room_id,existing_room_status:recipient.existing_room_status,will_accept_message_request:Boolean(recipient.will_accept_message_request),will_create_message_request:Boolean(recipient.will_create_message_request)}, content:{body:String(d.content.body ?? ""),...(media?{attachment:{name:media.name,mime_type:media.mime_type,size:media.size,sha256:media.sha256}}:{})}, notice:media?`${notice} The prepared attachment is bound to this preview.`:notice } };
     }
-    // Both Obscura and Lightpanda are read-only for Reddit. Lightpanda's
+    // Lightpanda is read-only for Reddit. Its
     // faceplate-textarea-input component does not initialize in the live composer.
     // Only Chrome may fill and publish approval-bound mutations.
     const page = await this.page(d.account, true, true);
@@ -732,14 +725,14 @@ export class RedditBrowserAdapter implements Adapter {
 
   async diagnose(live: boolean): Promise<Record<string, unknown>> {
     const chrome = fs.existsSync(this.config.chromePath);
-    if (!live) return { adapter: this.id, backend: this.config.redditBrowser === "obscura" ? "obscura-read/chrome-write" : this.config.redditBrowser === "lightpanda" ? "lightpanda" : "browser", chrome_exists: chrome, display: this.config.display,
+    if (!live) return { adapter: this.id, backend: this.config.redditBrowser === "lightpanda" ? "lightpanda-read/chrome-write" : "browser", chrome_exists: chrome, display: this.config.display,
       browser_idle_seconds: this.config.browserIdleSeconds ?? 90, metadata_cache_seconds: this.config.redditMetadataCacheSeconds ?? 900 };
     const page = await this.page("default", true);
     try {
       await this.gotoRetry(page, "https://www.reddit.com/");
       this.assertOrigin(page.url());
       const gate = await this.gate(page);
-      return { adapter: this.id, backend: this.browserLabel(page), configured_backend: this.config.redditBrowser === "obscura" ? "obscura-read/chrome-write" : this.config.redditBrowser === "lightpanda" ? "lightpanda" : "browser", chrome_exists: chrome, reddit_reachable: !gate, title: await page.title(), authenticated: (await this.cookieAuthenticated(page)) && !gate, requires_user_action: gate };
+      return { adapter: this.id, backend: this.browserLabel(page), configured_backend: this.config.redditBrowser === "lightpanda" ? "lightpanda-read/chrome-write" : "browser", chrome_exists: chrome, reddit_reachable: !gate, title: await page.title(), authenticated: (await this.cookieAuthenticated(page)) && !gate, requires_user_action: gate };
     } catch (e: any) {
       return { adapter: this.id, backend: this.browserLabel(page), chrome_exists: chrome, reddit_reachable: false, error: e.message };
     } finally {
@@ -1243,16 +1236,14 @@ export class RedditBrowserAdapter implements Adapter {
     return s;
   }
 
-  private browserLabel(page: Page): "browser" | "obscura" | "lightpanda" {
-    const backend = this.pageBackends.get(page);
-    return backend === "obscura" || backend === "lightpanda" ? backend : "browser";
+  private browserLabel(page: Page): "browser" | "lightpanda" {
+    return this.pageBackends.get(page) === "lightpanda" ? "lightpanda" : "browser";
   }
 
   private pinBackend(page: Page, account: string, key: string): void {
     const backend = this.pageBackends.get(page) ?? "chrome";
     this.pinnedBackends.set(account + ":" + key, backend);
-    if (backend === "obscura") this.obscura.pin(account, key, this.config.approvalTtlSeconds);
-    else if (backend === "lightpanda") this.lightpanda.pin(account, key, this.config.approvalTtlSeconds);
+    if (backend === "lightpanda") this.lightpanda.pin(account, key, this.config.approvalTtlSeconds);
     else this.chrome.pin(account, key, this.config.approvalTtlSeconds);
   }
 
@@ -1260,27 +1251,25 @@ export class RedditBrowserAdapter implements Adapter {
     const id = account + ":" + key;
     const backend = this.pinnedBackends.get(id) ?? "chrome";
     this.pinnedBackends.delete(id);
-    if (backend === "obscura") this.obscura.unpin(account, key);
-    else if (backend === "lightpanda") this.lightpanda.unpin(account, key);
+    if (backend === "lightpanda") this.lightpanda.unpin(account, key);
     else this.chrome.unpin(account, key);
   }
 
   private async releasePage(page: Page, account: string): Promise<void> {
-    if (this.pageBackends.get(page) === "obscura") await this.obscura.release(account);
-    else if (this.pageBackends.get(page) === "lightpanda") await this.lightpanda.release(account);
+    if (this.pageBackends.get(page) === "lightpanda") await this.lightpanda.release(account);
     else this.chrome.release(account);
   }
 
   private async page(account: string, lean: boolean, forceChrome = false): Promise<Page> {
     let page: Page | undefined;
-    let backend: "chrome" | "obscura" | "lightpanda" = "chrome";
+    let backend: "chrome" | "lightpanda" = "chrome";
     const order=forceChrome ? ["chrome"] as const : redditReadBackendOrder(
-      this.config.redditBrowser,this.obscura.hasAuthSnapshot(account),this.lightpanda.hasAuthSnapshot(account));
+      this.config.redditBrowser,this.lightpanda.hasAuthSnapshot(account));
     for (const candidate of order) {
       if (candidate==="chrome") break;
       const validationKey=candidate+":"+account;
       if (Date.now() < (this.browserDisabledUntil.get(validationKey) ?? 0)) continue;
-      const client=candidate==="obscura" ? this.obscura : this.lightpanda;
+      const client=this.lightpanda;
       let acquired=false;
       try {
         page=await client.page(account);

@@ -7,7 +7,7 @@ import { open, seal } from "./crypto-store.js";
 
 const REDDIT_AUTH_COOKIES = new Set(["reddit_session", "token_v2"]);
 
-type ObscuraSession = {
+type LightpandaSession = {
   browser?: Browser;
   context?: BrowserContext;
   connecting?: Promise<Browser>;
@@ -15,11 +15,11 @@ type ObscuraSession = {
   idleTimer?: ReturnType<typeof setTimeout>;
   pins: Map<string, ReturnType<typeof setTimeout>>;
   authImported?: boolean;
-  target?: ObscuraTarget;
+  target?: LightpandaTarget;
   process?: ChildProcess;
 };
 
-type ObscuraTarget = {
+type LightpandaTarget = {
   instance: string;
   storageDir: string;
   authFile: string;
@@ -35,10 +35,10 @@ export function hasRedditAuthCookie(cookies: Array<Pick<Cookie, "name" | "domain
   return cookies.some(cookie => isRedditCookie(cookie as Pick<Cookie, "domain">) && REDDIT_AUTH_COOKIES.has(cookie.name));
 }
 
-export class ExternalRedditObscura {
-  private static sessions = new Map<string, ObscuraSession>();
+export class ExternalRedditLightpanda {
+  private static sessions = new Map<string, LightpandaSession>();
 
-  constructor(private config: Config, private mode: "obscura" | "lightpanda" = "obscura") {}
+  constructor(private config: Config) {}
 
   async page(account: string): Promise<Page> {
     const target = this.target(account);
@@ -51,7 +51,7 @@ export class ExternalRedditObscura {
       const browser = await this.browser(target, session);
       let context = session.context ?? browser.contexts()[0];
       // Refresh a Lightpanda context closed without a browser disconnect.
-      if (this.mode === "lightpanda" && (!context || context.isClosed())) {
+      if (!context || context.isClosed()) {
         context = await browser.newContext();
         session.context = context;
         session.authImported = false;
@@ -75,7 +75,7 @@ export class ExternalRedditObscura {
 
   async shutdown(account: string): Promise<void> {
     const target = this.target(account);
-    const session = ExternalRedditObscura.sessions.get(target.instance);
+    const session = ExternalRedditLightpanda.sessions.get(target.instance);
     if (!session) return;
     this.cancelIdle(session);
     if (session.active > 0 || session.pins.size > 0 || session.connecting) return;
@@ -84,7 +84,7 @@ export class ExternalRedditObscura {
 
   async release(account: string): Promise<void> {
     const target = this.target(account);
-    const session = ExternalRedditObscura.sessions.get(target.instance);
+    const session = ExternalRedditLightpanda.sessions.get(target.instance);
     if (!session) return;
     try {
       const context = session.browser?.isConnected() ? session.context ?? session.browser.contexts()[0] : undefined;
@@ -114,7 +114,7 @@ export class ExternalRedditObscura {
 
   unpin(account: string, key: string): void {
     const target = this.target(account);
-    const session = ExternalRedditObscura.sessions.get(target.instance);
+    const session = ExternalRedditLightpanda.sessions.get(target.instance);
     if (!session) return;
     const timer = session.pins.get(key);
     if (timer) clearTimeout(timer);
@@ -128,7 +128,7 @@ export class ExternalRedditObscura {
     if (!hasRedditAuthCookie(redditCookies)) return 0;
     this.writeAuth(target.authFile, redditCookies);
 
-    const session = ExternalRedditObscura.sessions.get(target.instance);
+    const session = ExternalRedditLightpanda.sessions.get(target.instance);
     const context = session?.browser?.isConnected() ? session.context ?? session.browser.contexts()[0] : undefined;
     if (context) {
       await context.addCookies(this.toSetCookies(redditCookies));
@@ -141,35 +141,35 @@ export class ExternalRedditObscura {
     return hasRedditAuthCookie(this.readAuth(this.target(account).authFile));
   }
 
-  private target(account: string): ObscuraTarget {
+  private target(account: string): LightpandaTarget {
     const shared = account === "owner-main" || account === "reddit-main" || account === "default";
     const safe = shared ? "owner-main" : account.replace(/[^a-z0-9_-]/gi, "_");
-    const storageDir = path.join(this.config.stateDir, this.mode, "reddit", safe);
-    const authDir = this.mode === "lightpanda" ? path.join(this.config.stateDir, "auth", "lightpanda") : path.join(this.config.stateDir, "auth", "reddit");
+    const storageDir = path.join(this.config.stateDir, "lightpanda", "reddit", safe);
+    const authDir = path.join(this.config.stateDir, "auth", "lightpanda");
     fs.mkdirSync(storageDir, { recursive: true, mode: 0o700 });
     fs.mkdirSync(authDir, { recursive: true, mode: 0o700 });
     fs.chmodSync(storageDir, 0o700);
     fs.chmodSync(authDir, 0o700);
-    const instance = `${this.mode}__reddit__${safe}`;
+    const instance = `lightpanda__reddit__${safe}`;
     const checksum = Buffer.from(instance).reduce((sum, byte) => (sum + byte) >>> 0, 0);
     return {
       instance,
       storageDir,
       authFile: path.join(authDir, `${safe}.cookies.enc`),
-      port: (this.mode === "lightpanda" ? 12300 : 11300) + (checksum % 500),
+      port: 12300 + (checksum % 500),
     };
   }
 
-  private session(instance: string): ObscuraSession {
-    let session = ExternalRedditObscura.sessions.get(instance);
+  private session(instance: string): LightpandaSession {
+    let session = ExternalRedditLightpanda.sessions.get(instance);
     if (!session) {
       session = { active: 0, pins: new Map() };
-      ExternalRedditObscura.sessions.set(instance, session);
+      ExternalRedditLightpanda.sessions.set(instance, session);
     }
     return session;
   }
 
-  private async browser(target: ObscuraTarget, session: ObscuraSession): Promise<Browser> {
+  private async browser(target: LightpandaTarget, session: LightpandaSession): Promise<Browser> {
     if (session.browser?.isConnected()) return session.browser;
     if (session.connecting) return session.connecting;
     session.connecting = this.connect(target, session);
@@ -180,17 +180,14 @@ export class ExternalRedditObscura {
     }
   }
 
-  private async connect(target: ObscuraTarget, session: ObscuraSession): Promise<Browser> {
-    const executable = this.mode === "lightpanda" ? this.config.lightpandaPath ?? "/usr/local/bin/lightpanda" : this.config.obscuraPath ?? "/opt/agent-publisher/vendor/obscura/obscura";
-    if (path.isAbsolute(executable) && !fs.existsSync(executable)) throw new Error(`OBSCURA_START_FAILED: executable not found at ${executable}`);
-    const portFile = path.join(target.storageDir, "ObscuraDebugPort");
+  private async connect(target: LightpandaTarget, session: LightpandaSession): Promise<Browser> {
+    const executable = this.config.lightpandaPath ?? "/usr/local/bin/lightpanda";
+    if (path.isAbsolute(executable) && !fs.existsSync(executable)) throw new Error(`LIGHTPANDA_START_FAILED: executable not found at ${executable}`);
+    const portFile = path.join(target.storageDir, "LightpandaDebugPort");
     fs.writeFileSync(portFile, `${target.port}\n`, { encoding: "utf8", mode: 0o600 });
     fs.chmodSync(portFile, 0o600);
 
-    const args = this.mode === "lightpanda"
-      ? ["serve", "--host", "127.0.0.1", "--port", String(target.port), "--disable-metrics"]
-      : ["--stealth", "--storage-dir", target.storageDir,
-         "serve", "--host", "127.0.0.1", "--port", String(target.port), "--max-connections", "8"];
+    const args = ["serve", "--host", "127.0.0.1", "--port", String(target.port), "--disable-metrics"];
     const child = spawn(executable, args, {
       stdio: "ignore",
       env: { ...process.env, LIGHTPANDA_DISABLE_TELEMETRY: "true", LIGHTPANDA_DISABLE_CORE_DUMP: "1" },
@@ -207,7 +204,7 @@ export class ExternalRedditObscura {
     for (let i = 0; i < 80; i += 1) {
       if (child.exitCode !== null) break;
       try {
-        browser = await chromium.connectOverCDP(`${this.mode === "lightpanda" ? "ws" : "http"}://127.0.0.1:${target.port}`);
+        browser = await chromium.connectOverCDP(`ws://127.0.0.1:${target.port}`);
         break;
       } catch (error) {
         last = error;
@@ -217,16 +214,14 @@ export class ExternalRedditObscura {
     if (!browser) {
       if (child.exitCode === null) child.kill("SIGTERM");
       session.process = undefined;
-      throw new Error(`OBSCURA_START_FAILED: cannot attach to local CDP endpoint: ${String(last)}`);
+      throw new Error(`LIGHTPANDA_START_FAILED: cannot attach to local CDP endpoint: ${String(last)}`);
     }
 
-    if (this.mode === "lightpanda") {
-      try { session.context = await browser.newContext(); }
-      catch (error) {
-        await browser.close().catch(() => undefined);
-        if (child.exitCode === null) child.kill("SIGTERM");
-        throw error;
-      }
+    try { session.context = await browser.newContext(); }
+    catch (error) {
+      await browser.close().catch(() => undefined);
+      if (child.exitCode === null) child.kill("SIGTERM");
+      throw error;
     }
     session.authImported = false;
     session.browser = browser;
@@ -236,14 +231,14 @@ export class ExternalRedditObscura {
     return browser;
   }
 
-  private async restoreAuth(target: ObscuraTarget, session: ObscuraSession, context: BrowserContext): Promise<void> {
+  private async restoreAuth(target: LightpandaTarget, session: LightpandaSession, context: BrowserContext): Promise<void> {
     if (session.authImported) return;
     const cookies = this.readAuth(target.authFile);
     if (cookies.length) await context.addCookies(this.toSetCookies(cookies));
     session.authImported = true;
   }
 
-  private async persistAuth(target: ObscuraTarget, context: BrowserContext): Promise<void> {
+  private async persistAuth(target: LightpandaTarget, context: BrowserContext): Promise<void> {
     const cookies = (await context.cookies()).filter(cookie => isRedditCookie(cookie));
     if (!hasRedditAuthCookie(cookies)) return;
     this.writeAuth(target.authFile, cookies);
@@ -281,7 +276,7 @@ export class ExternalRedditObscura {
     }));
   }
 
-  private scheduleIdle(instance: string, session: ObscuraSession): void {
+  private scheduleIdle(instance: string, session: LightpandaSession): void {
     this.cancelIdle(session);
     if (session.active > 0 || session.pins.size > 0 || session.connecting) return;
     const idleSeconds = Math.max(5, Number(this.config.browserIdleSeconds ?? 90));
@@ -292,13 +287,13 @@ export class ExternalRedditObscura {
     session.idleTimer.unref?.();
   }
 
-  private cancelIdle(session: ObscuraSession): void {
+  private cancelIdle(session: LightpandaSession): void {
     if (!session.idleTimer) return;
     clearTimeout(session.idleTimer);
     session.idleTimer = undefined;
   }
 
-  private async stopIfIdle(instance: string, session: ObscuraSession): Promise<void> {
+  private async stopIfIdle(instance: string, session: LightpandaSession): Promise<void> {
     if (session.active > 0 || session.pins.size > 0 || session.connecting) return;
     try {
       const context = session.browser?.isConnected() ? session.context ?? session.browser.contexts()[0] : undefined;
@@ -310,7 +305,7 @@ export class ExternalRedditObscura {
       session.context = undefined;
       session.process = undefined;
       session.authImported = false;
-      ExternalRedditObscura.sessions.delete(instance);
+      ExternalRedditLightpanda.sessions.delete(instance);
     }
   }
 }

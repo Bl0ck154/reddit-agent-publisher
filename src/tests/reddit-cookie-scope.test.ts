@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { hasRedditAuthCookie, isRedditCookie } from "../external-reddit-obscura.js";
+import { hasRedditAuthCookie, isRedditCookie } from "../external-reddit-lightpanda.js";
 
 test("Reddit cookie scope excludes lookalike and unrelated domains", () => {
   assert.equal(isRedditCookie({ domain: "reddit.com" }), true);

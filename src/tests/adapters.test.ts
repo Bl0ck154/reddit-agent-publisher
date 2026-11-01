@@ -213,11 +213,10 @@ test("moderation status never mistakes author visibility for public visibility",
   assert.equal(classifyRedditPostVisibility("",false).status,"UNKNOWN");
 });
 
-test("read backends fall back to other authenticated browser before Chrome; writes stay Chrome",()=>{
-  assert.deepEqual(redditReadBackendOrder("obscura",true,true),["obscura","lightpanda","chrome"]);
-  assert.deepEqual(redditReadBackendOrder("lightpanda",true,true),["lightpanda","obscura","chrome"]);
-  assert.deepEqual(redditReadBackendOrder("lightpanda",false,false),["chrome"]);
-  assert.deepEqual(redditReadBackendOrder("chrome",true,true),["chrome"]);
+test("read backend prefers authenticated Lightpanda then Chrome; writes stay Chrome",()=>{
+  assert.deepEqual(redditReadBackendOrder("lightpanda",true),["lightpanda","chrome"]);
+  assert.deepEqual(redditReadBackendOrder("lightpanda",false),["chrome"]);
+  assert.deepEqual(redditReadBackendOrder("chrome",true),["chrome"]);
 });
 
 test("Reddit listing moderation is identity-bound and accepts only explicit removal flags",()=>{

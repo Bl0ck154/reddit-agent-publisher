@@ -3,13 +3,13 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { ExternalRedditObscura } from "../external-reddit-obscura.js";
+import { ExternalRedditLightpanda } from "../external-reddit-lightpanda.js";
 import type { Config } from "../config.js";
 
 test("Lightpanda recreates a closed CDP context before reusing pages", async () => {
   const root=fs.mkdtempSync(path.join(os.tmpdir(),"lp-context-unit-"));
   try {
-    const client=new ExternalRedditObscura({stateDir:root} as Config,"lightpanda") as any;
+    const client=new ExternalRedditLightpanda({stateDir:root} as Config) as any;
     const target=client.target("owner-main");
     const session=client.session(target.instance);
     const page={isClosed:()=>false};
