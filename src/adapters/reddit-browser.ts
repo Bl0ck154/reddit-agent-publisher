@@ -286,6 +286,12 @@ export class RedditBrowserAdapter implements Adapter {
       if (authenticated) this.unpinBackend(account, `login:${account}`);
       return { backend: this.browserLabel(page), authenticated, account, username, current_url: page.url(),
         note: gate ?? "Persistent authenticated Reddit profile is available." };
+    } catch (error) {
+      if (this.pageBackends.get(page) === "lightpanda" && /Target page, context or browser has been closed|browserContext.cookies|Browser has been closed/i.test(String(error))) {
+        this.browserDisabledUntil = Date.now() + 300_000;
+        return await this.status(account);
+      }
+      throw error;
     } finally {
       await this.releasePage(page, account);
     }
@@ -344,6 +350,12 @@ export class RedditBrowserAdapter implements Adapter {
       };
       this.cacheSet(this.rulesCache, cacheKey, value);
       return value;
+    } catch (error) {
+      if (this.pageBackends.get(page) === "lightpanda" && /Target page, context or browser has been closed|browserContext.cookies|Browser has been closed/i.test(String(error))) {
+        this.browserDisabledUntil = Date.now() + 300_000;
+        return await this.rules(account, subreddit);
+      }
+      throw error;
     } finally {
       await this.releasePage(page, account);
     }

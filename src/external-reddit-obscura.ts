@@ -49,8 +49,14 @@ export class ExternalRedditObscura {
 
     try {
       const browser = await this.browser(target, session);
-      const context = session.context ?? browser.contexts()[0];
-      if (!context) throw new Error("OBSCURA_START_FAILED: CDP endpoint has no default browser context");
+      let context = session.context ?? browser.contexts()[0];
+      // Refresh a Lightpanda context closed without a browser disconnect.
+      if (this.mode === "lightpanda" && (!context || context.isClosed())) {
+        context = await browser.newContext();
+        session.context = context;
+        session.authImported = false;
+      }
+      if (!context) throw new Error("REDDIT_BROWSER_START_FAILED: no browser context");
       await this.restoreAuth(target, session, context);
 
       const pages = context.pages().filter(page => !page.isClosed());
