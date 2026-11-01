@@ -63,9 +63,9 @@ npx -y github:Bl0ck154/reddit-mcp-publisher setup --client codex
 npx -y github:Bl0ck154/reddit-mcp-publisher setup --client claude
 ```
 
-Setup writes MCP configurations under the existing state path '+chr(96)+'~/.local/share/reddit-agent-publisher/integrations/'+chr(96)+'. This path is retained for compatibility. It preserves existing browser profiles and encryption keys on rerun. The installer does **not** ask an AI for your Reddit password.
+Setup writes MCP configs under `~/.local/share/reddit-agent-publisher/integrations/`. This legacy state path stays unchanged to protect existing installations. It preserves existing browser profiles and encryption keys on rerun. The installer does **not** ask an AI for your Reddit password.
 
-**npm status:** the renamed npm package is not published yet. Until a verified publication, use the GitHub command above; do not use `npx reddit-agent-publisher`. See [desktop, server and manual setup](docs/installation.md) and [migration notes](docs/migrating.md).
+**npm status:** the renamed npm package is not published yet. Until a verified publication, use the GitHub command above; do not use `npx reddit-mcp-publisher`. See [desktop, server and manual setup](docs/installation.md) and [migration notes](docs/migrating.md).
 
 ## What it does
 
