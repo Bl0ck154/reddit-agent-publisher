@@ -229,6 +229,15 @@ export class PublisherService {
     } catch(e:any) { return this.fail(e,id); }
   }
 
+  async redditPostVisibility(account:string, url:string):Promise<ResultEnvelope> {
+    try {
+      const effective=this.effectiveAccount("reddit",account);
+      const result=await (this.adapter("reddit") as RedditBrowserAdapter).publicationVisibility(effective,url);
+      return envelope({adapter:"reddit",account:effective,side_effect:{performed:false},
+        result:{url,status:result.status,visibility_status:result.status,reason:result.reason,checked_at:result.checked_at,public_visibility_verified:false}});
+    } catch(error:any) { return this.fail(error); }
+  }
+
   async redditPreflight(account: string, subreddit: string, action: "post"|"comment" = "post", context: {post_title?:string;target_url?:string} = {}): Promise<ResultEnvelope> { try { return envelope({ adapter:"reddit", account:this.effectiveAccount("reddit",account), result:await (this.adapter("reddit") as RedditBrowserAdapter).preflight(this.effectiveAccount("reddit",account),subreddit,action,context) }); } catch(e:any){return this.fail(e);} }
 
   async rules(account: string, subreddit: string): Promise<ResultEnvelope> { try { return envelope({ adapter: "reddit", result: await (this.adapter("reddit") as RedditBrowserAdapter).rules(this.effectiveAccount("reddit",account), subreddit) }); } catch(e:any){return this.fail(e);} }
