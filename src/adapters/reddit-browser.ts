@@ -4,6 +4,7 @@ import { type Locator, type Page } from "playwright-core";
 import type { Config } from "../config.js";
 import { RedditChat, isRedditChatRoomId } from "../reddit-chat.js";
 import { ExternalChrome } from "../external-chrome.js";
+import { ExternalRedditObscura } from "../external-reddit-obscura.js";
 import type { Draft } from "../types.js";
 import type { Adapter, PreviewData, PublishData } from "./base.js";
 import { PublisherError } from "../errors.js";
@@ -190,6 +191,11 @@ const ui = {
 export class RedditBrowserAdapter implements Adapter {
   readonly id = "reddit";
   private chrome: ExternalChrome;
+  private obscura: ExternalRedditObscura;
+  private pageBackends = new WeakMap<Page, "chrome" | "obscura">();
+  private pinnedBackends = new Map<string, "chrome" | "obscura">();
+  private obscuraValidated = new Set<string>();
+  private obscuraDisabledUntil = 0;
   private previews = new Map<string, PreviewSession>();
   private previewTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private rulesCache = new Map<string, CacheEntry>();
@@ -198,7 +204,7 @@ export class RedditBrowserAdapter implements Adapter {
   private leanStates = new WeakMap<Page, LeanState>();
   private chat: RedditChat;
 
-  constructor(private config: Config) { this.chrome = new ExternalChrome(config, "reddit"); this.chat = new RedditChat(config); }
+  constructor(private config: Config) { this.chrome = new ExternalChrome(config, "reddit"); this.obscura = new ExternalRedditObscura(config); this.chat = new RedditChat(config); }
 
   async validate(d: Draft): Promise<void> {
     if (d.action === "create_post") {
@@ -233,23 +239,23 @@ export class RedditBrowserAdapter implements Adapter {
   }
 
   async login(account: string): Promise<Record<string, unknown>> {
-    const page = await this.page(account, false);
+    const page = await this.page(account, false, true);
     const loginPin = `login:${account}`;
     try {
       await this.gotoRetry(page, "https://www.reddit.com/");
       this.assertOrigin(page.url());
       const authenticated = await this.cookieAuthenticated(page) && !await this.gate(page);
       if (authenticated) {
-        this.chrome.unpin(account, loginPin);
+        this.unpinBackend(account, loginPin);
         return { status: "ALREADY_AUTHENTICATED", backend: "browser", account, current_url: page.url(), note: "Persistent authenticated Reddit profile is already available; VNC is not required." };
       }
       await this.gotoRetry(page, "https://www.reddit.com/login/");
-      this.chrome.pin(account, loginPin, this.config.approvalTtlSeconds);
+      this.pinBackend(page, account, loginPin);
       return { status: "USER_ACTION_REQUIRED", backend: "browser", account, current_url: page.url(),
         takeover: { client: "Any VNC viewer", address: "localhost:5901", tunnel: "ssh -N -L 5901:127.0.0.1:5901 YOUR_SERVER" },
         instructions: "Open the owner-controlled browser session (for example through a localhost-only VNC tunnel), then complete login/2FA/CAPTCHA in Chrome. Never send credentials through the publisher." };
     } finally {
-      this.chrome.release(account);
+      await this.releasePage(page, account);
     }
   }
 
@@ -262,13 +268,13 @@ export class RedditBrowserAdapter implements Adapter {
         const gate = await this.gate(page);
         const authenticated = !gate;
         const username = authenticated ? await this.detectUsername(page) : undefined;
-        if (authenticated) this.chrome.unpin(account, `login:${account}`);
-        return { backend: "browser", authenticated, account, username, current_url: current,
+        if (authenticated) this.unpinBackend(account, `login:${account}`);
+        return { backend: this.browserLabel(page), authenticated, account, username, current_url: current,
           note: gate ?? "Persistent authenticated Reddit profile is available." };
       }
       if (hasSession) {
-        this.chrome.unpin(account, `login:${account}`);
-        return { backend: "browser", authenticated: true, account, current_url: current,
+        this.unpinBackend(account, `login:${account}`);
+        return { backend: this.browserLabel(page), authenticated: true, account, current_url: current,
           verification: "persistent_session_cookie", note: "Persistent Reddit session cookies are present. The next real operation will verify the live UI." };
       }
       await this.gotoRetry(page, "https://www.reddit.com/");
@@ -276,11 +282,11 @@ export class RedditBrowserAdapter implements Adapter {
       const gate = await this.gate(page);
       const authenticated = await this.cookieAuthenticated(page) && !gate;
       const username = authenticated ? await this.detectUsername(page) : undefined;
-      if (authenticated) this.chrome.unpin(account, `login:${account}`);
-      return { backend: "browser", authenticated, account, username, current_url: page.url(),
+      if (authenticated) this.unpinBackend(account, `login:${account}`);
+      return { backend: this.browserLabel(page), authenticated, account, username, current_url: page.url(),
         note: gate ?? "Persistent authenticated Reddit profile is available." };
     } finally {
-      this.chrome.release(account);
+      await this.releasePage(page, account);
     }
   }
 
@@ -327,7 +333,7 @@ export class RedditBrowserAdapter implements Adapter {
       if (!formatted) throw new Error("SITE_CHANGED: Reddit rules API returned an unexpected payload");
 
       const value = {
-        backend: "browser",
+        backend: this.browserLabel(page),
         subreddit: sub,
         url: response.url,
         text: formatted.text,
@@ -338,7 +344,7 @@ export class RedditBrowserAdapter implements Adapter {
       this.cacheSet(this.rulesCache, cacheKey, value);
       return value;
     } finally {
-      this.chrome.release(account);
+      await this.releasePage(page, account);
     }
   }
 
@@ -354,7 +360,7 @@ export class RedditBrowserAdapter implements Adapter {
     try {
       return await this.preflightOnPage(page,sub,action,{postTitle:context.post_title,targetPostId});
     } finally {
-      this.chrome.release(account);
+      await this.releasePage(page, account);
     }
   }
 
@@ -387,7 +393,7 @@ export class RedditBrowserAdapter implements Adapter {
         return Object.fromEntries(entries);
       },endpoints);
     } catch(error:any) {
-      return {backend:"browser",subreddit:sub,action,profile:{username},eligibility:{status:"unknown",blocked:false,blockers:[],checks:[],detected_requirements:0},notifications:{unread_count:0,important_count:0,items:[]},warnings:[`Reddit eligibility/notification preflight could not be completed: ${String(error?.message ?? error).slice(0,180)}`],fetched_at:new Date().toISOString()};
+      return {backend:this.browserLabel(page),subreddit:sub,action,profile:{username},eligibility:{status:"unknown",blocked:false,blockers:[],checks:[],detected_requirements:0},notifications:{unread_count:0,important_count:0,items:[]},warnings:[`Reddit eligibility/notification preflight could not be completed: ${String(error?.message ?? error).slice(0,180)}`],fetched_at:new Date().toISOString()};
     }
     const parse=(key:string):unknown=>{
       const response=responses[key];
@@ -456,7 +462,7 @@ export class RedditBrowserAdapter implements Adapter {
     if(!(bell as any).available) warnings.push("Reddit bell preflight was unavailable; legacy inbox and subreddit eligibility sources were still checked.");
     const unavailable=Object.entries(responses).filter(([,response])=>response.status<200 || response.status>=300).map(([key,response])=>`${key}:${response.status||"network"}`);
     if(unavailable.length) warnings.push(`Reddit preflight was partial (${unavailable.join(", ")}); no missing check was treated as proof of eligibility.`);
-    return {backend:"browser",subreddit:sub,action,context:{post_title:targetTitle||undefined,conditional_requirement_mode:conditionalRequirementMode},profile,eligibility,notifications:{...notificationDigest,bell_available:Boolean((bell as any).available),bell_read_state:"unknown"},requirements:deduped,rules:formattedRules?{rules:formattedRules.rules,text:formattedRules.text}:undefined,warnings,fetched_at:new Date().toISOString()};
+    return {backend:this.browserLabel(page),subreddit:sub,action,context:{post_title:targetTitle||undefined,conditional_requirement_mode:conditionalRequirementMode},profile,eligibility,notifications:{...notificationDigest,bell_available:Boolean((bell as any).available),bell_read_state:"unknown"},requirements:deduped,rules:formattedRules?{rules:formattedRules.rules,text:formattedRules.text}:undefined,warnings,fetched_at:new Date().toISOString()};
   }
 
   private eligibilityBlockMessage(preflight: Record<string, unknown>): string {
@@ -473,7 +479,7 @@ export class RedditBrowserAdapter implements Adapter {
     const cached = this.cacheGet(this.flairsCache, cacheKey);
     if (cached) return cached;
 
-    const page = await this.page(account, true);
+    const page = await this.page(account, true, true);
     try {
       await this.gotoRetry(page, `https://www.reddit.com/r/${encodeURIComponent(sub)}/submit?type=TEXT`);
       this.assertOrigin(page.url());
@@ -502,7 +508,7 @@ export class RedditBrowserAdapter implements Adapter {
       this.cacheSet(this.flairsCache, cacheKey, value);
       return value;
     } finally {
-      this.chrome.release(account);
+      await this.releasePage(page, account);
     }
   }
 
@@ -523,7 +529,9 @@ export class RedditBrowserAdapter implements Adapter {
       const media=this.chatMediaFile(d);
       return { summary: { backend:"reddit-matrix", action:d.action, account:d.account, target:{recipient_username:recipient.username,recipient_fullname:recipient.fullname,matrix_user_id:recipient.matrix_user_id,existing_room_id:recipient.existing_room_id,existing_room_status:recipient.existing_room_status,will_accept_message_request:Boolean(recipient.will_accept_message_request),will_create_message_request:Boolean(recipient.will_create_message_request)}, content:{body:String(d.content.body ?? ""),...(media?{attachment:{name:media.name,mime_type:media.mime_type,size:media.size,sha256:media.sha256}}:{})}, notice:media?`${notice} The prepared attachment is bound to this preview.`:notice } };
     }
-    const page = await this.page(d.account, true);
+    // Reddit's Shreddit composer and image uploader are not compatible with Obscura 0.2.3.
+    // Keep every preview/publish mutation bound to the known-good Chrome DOM.
+    const page = await this.page(d.account, true, true);
     try {
       let preflight: Record<string, unknown> | undefined;
       let preflightWarnings: string[] = [];
@@ -552,17 +560,17 @@ export class RedditBrowserAdapter implements Adapter {
         : d.action === "create_comment" && session.voteDirection
           ? `The exact Reddit comment form and ${session.voteDirection}vote control are verified. The comment was not submitted and no vote was clicked.`
           : "The exact Reddit form is ready; no Post/Comment/Save/Delete action was clicked.";
-      return { summary: { backend: "browser", action: d.action, account: d.account, target: d.target, target_identity: session.targetIdentity,
+      return { summary: { backend: this.browserLabel(page), action: d.action, account: d.account, target: d.target, target_identity: session.targetIdentity,
         content, ...(session.voteDirection ? {vote:{direction:session.voteDirection,current_state:session.voteStateBefore}} : {}), current_url: page.url(), preflight, notice }, artifact_path: artifact, warnings: preflightWarnings };
     } finally {
-      this.chrome.release(d.account);
+      await this.releasePage(page, d.account);
     }
   }
 
   approved(d: Draft): void {
     const session = this.previews.get(d.id);
     if (!session) return;
-    this.chrome.pin(d.account, this.previewPin(d.id), this.config.approvalTtlSeconds);
+    this.pinBackend(session.page, d.account, this.previewPin(d.id));
     this.schedulePreviewExpiry(d.id, session, this.config.approvalTtlSeconds);
   }
 
@@ -627,24 +635,24 @@ export class RedditBrowserAdapter implements Adapter {
       return { status: "PUBLISHED", url: s.page.url(), warnings: [] };
     } finally {
       this.forgetPreview(d.id);
-      this.chrome.unpin(d.account, pin);
+      this.unpinBackend(d.account, pin);
     }
   }
 
   async diagnose(live: boolean): Promise<Record<string, unknown>> {
     const chrome = fs.existsSync(this.config.chromePath);
-    if (!live) return { adapter: this.id, backend: "browser", chrome_exists: chrome, display: this.config.display,
+    if (!live) return { adapter: this.id, backend: this.config.redditBrowser === "obscura" ? "obscura-read/chrome-write" : "browser", chrome_exists: chrome, display: this.config.display,
       browser_idle_seconds: this.config.browserIdleSeconds ?? 90, metadata_cache_seconds: this.config.redditMetadataCacheSeconds ?? 900 };
     const page = await this.page("default", true);
     try {
       await this.gotoRetry(page, "https://www.reddit.com/");
       this.assertOrigin(page.url());
       const gate = await this.gate(page);
-      return { adapter: this.id, backend: "browser", chrome_exists: chrome, reddit_reachable: !gate, title: await page.title(), authenticated: !gate, requires_user_action: gate };
+      return { adapter: this.id, backend: this.browserLabel(page), configured_backend: this.config.redditBrowser === "obscura" ? "obscura-read/chrome-write" : "browser", chrome_exists: chrome, reddit_reachable: !gate, title: await page.title(), authenticated: (await this.cookieAuthenticated(page)) && !gate, requires_user_action: gate };
     } catch (e: any) {
-      return { adapter: this.id, backend: "browser", chrome_exists: chrome, reddit_reachable: false, error: e.message };
+      return { adapter: this.id, backend: this.browserLabel(page), chrome_exists: chrome, reddit_reachable: false, error: e.message };
     } finally {
-      this.chrome.release("default");
+      await this.releasePage(page, "default");
     }
   }
 
@@ -1125,15 +1133,66 @@ export class RedditBrowserAdapter implements Adapter {
     return s;
   }
 
-  private async page(account: string, lean: boolean): Promise<Page> {
-    const page = await this.chrome.page(account);
+  private browserLabel(page: Page): "browser" | "obscura" {
+    return this.pageBackends.get(page) === "obscura" ? "obscura" : "browser";
+  }
+
+  private pinBackend(page: Page, account: string, key: string): void {
+    const backend = this.pageBackends.get(page) ?? "chrome";
+    this.pinnedBackends.set(account + ":" + key, backend);
+    if (backend === "obscura") this.obscura.pin(account, key, this.config.approvalTtlSeconds);
+    else this.chrome.pin(account, key, this.config.approvalTtlSeconds);
+  }
+
+  private unpinBackend(account: string, key: string): void {
+    const id = account + ":" + key;
+    const backend = this.pinnedBackends.get(id) ?? "chrome";
+    this.pinnedBackends.delete(id);
+    if (backend === "obscura") this.obscura.unpin(account, key);
+    else this.chrome.unpin(account, key);
+  }
+
+  private async releasePage(page: Page, account: string): Promise<void> {
+    if (this.pageBackends.get(page) === "obscura") await this.obscura.release(account);
+    else this.chrome.release(account);
+  }
+
+  private async page(account: string, lean: boolean, forceChrome = false): Promise<Page> {
+    let page: Page;
+    let backend: "chrome" | "obscura" = "chrome";
+    const canUseObscura = !forceChrome && this.config.redditBrowser === "obscura" &&
+      Date.now() >= this.obscuraDisabledUntil && this.obscura.hasAuthSnapshot(account);
+    if (canUseObscura) {
+      let acquired = false;
+      try {
+        page = await this.obscura.page(account);
+        acquired = true;
+        if (!this.obscuraValidated.has(account)) {
+          await page.goto("https://www.reddit.com/", { waitUntil: "domcontentloaded", timeout: 25_000 });
+          const identity = await page.evaluate(async () => {
+            const response = await fetch("/api/me.json?raw_json=1", { credentials: "include" });
+            if (!response.ok) return "";
+            const payload = await response.json() as { data?: { name?: string } };
+            return String(payload?.data?.name ?? "");
+          });
+          if (!identity) throw new Error("OBSCURA_REDDIT_AUTH_REQUIRED");
+          this.obscuraValidated.add(account);
+        }
+        backend = "obscura";
+      } catch {
+        if (acquired) await this.obscura.release(account).catch(() => undefined);
+        this.obscuraDisabledUntil = Date.now() + 300_000;
+        page = await this.chrome.page(account);
+      }
+    } else page = await this.chrome.page(account);
+    this.pageBackends.set(page, backend);
     let state = this.leanStates.get(page);
     if (!state) {
       state = { enabled: lean };
       this.leanStates.set(page, state);
     } else state.enabled = lean;
 
-    if (!this.leanPages.has(page)) {
+    if (backend === "chrome" && !this.leanPages.has(page)) {
       const captured = state;
       await page.route("**/*", async route => {
         const request = route.request();
@@ -1462,7 +1521,7 @@ export class RedditBrowserAdapter implements Adapter {
   private rememberPreview(d: Draft, session: PreviewSession): void {
     this.forgetPreview(d.id);
     this.previews.set(d.id, session);
-    this.chrome.pin(d.account, this.previewPin(d.id), this.config.approvalTtlSeconds);
+    this.pinBackend(session.page, d.account, this.previewPin(d.id));
     this.schedulePreviewExpiry(d.id, session, this.config.approvalTtlSeconds);
   }
 

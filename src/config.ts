@@ -6,6 +6,8 @@ export interface Config {
   stateDir: string;
   socketPath: string;
   chromePath: string;
+  obscuraPath?: string;
+  redditBrowser?: "chrome" | "obscura";
   display: string;
   approvalTtlSeconds: number;
   mutationCooldownSeconds: number;
@@ -39,6 +41,8 @@ export function loadConfig(): Config {
     stateDir,
     socketPath: process.env.PUBLISHER_SOCKET ?? file.socketPath ?? path.join(stateDir, "publisher.sock"),
     chromePath: process.env.PUBLISHER_CHROME ?? file.chromePath ?? "/opt/google/chrome/google-chrome",
+    obscuraPath: process.env.PUBLISHER_OBSCURA ?? file.obscuraPath ?? "obscura",
+    redditBrowser: String(process.env.PUBLISHER_REDDIT_BROWSER ?? file.redditBrowser ?? "chrome") === "obscura" ? "obscura" : "chrome",
     display: process.env.DISPLAY ?? file.display ?? ":98",
     approvalTtlSeconds: Number(file.approvalTtlSeconds ?? 900),
     mutationCooldownSeconds: Number(file.mutationCooldownSeconds ?? 15),

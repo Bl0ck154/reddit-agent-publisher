@@ -427,3 +427,15 @@ This project is not affiliated with or endorsed by Reddit.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+### Optional Reddit Obscura backend
+
+By default Reddit still uses Chrome. To opt into Obscura after migrating an encrypted Reddit
+cookie snapshot, set PUBLISHER_REDDIT_BROWSER=obscura (or redditBrowser: "obscura" in
+Publisher configuration). Reddit Obscura's profile and AES-GCM cookie snapshot are isolated
+under obscura/reddit/ and auth/reddit/ in the Publisher state directory. If the Obscura
+backend cannot start or fails the authenticated identity check, the adapter uses Chrome for
+that request and pauses Obscura attempts for five minutes. Login/2FA remains on Chrome.
+For Reddit 0.2.3, Obscura is read-only: session/status, rules and metadata preflight.
+The image composer, flair UI, posting, commenting and other mutations stay on Chrome.
+An approved preview is published from its original Chrome page without backend switching.
