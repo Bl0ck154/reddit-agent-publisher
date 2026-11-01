@@ -203,6 +203,19 @@ export function classifyRedditPostVisibility(postText: string, postFound: boolea
   return postFound ? {status:"VISIBLE_TO_AUTHOR",reason:"authenticated_view_only_not_public_proof"} : {status:"UNKNOWN",reason:"no_verified_post_or_moderation_signal"};
 }
 
+export function classifyRedditListingModeration(payload: unknown, expectedFullname: string): { status: RedditVisibilityStatus; reason: string } {
+  if (!Array.isArray(payload)) return {status:"UNKNOWN",reason:"no_reddit_listing"};
+  const row=(payload[0] as any)?.data?.children?.[0];
+  const post=row?.kind==="t3" ? row.data : undefined;
+  if (!post || String(post.name??"")!==expectedFullname) return {status:"UNKNOWN",reason:"listing_post_identity_mismatch"};
+  const category=String(post.removed_by_category??"").toLowerCase();
+  if (category==="automod_filtered") return {status:"PENDING_REVIEW",reason:"reddit_listing_automod_filtered"};
+  if (category==="deleted") return {status:"DELETED",reason:"reddit_listing_deleted"};
+  if (["moderator","reddit","automod","content_takedown","copyright_takedown","anti_evil_ops"].includes(category))
+    return {status:"REMOVED",reason:"reddit_listing_"+category};
+  return {status:"UNKNOWN",reason:"no_explicit_moderation_flag"};
+}
+
 export function redditMediaFilesMatch(expected: Array<{name:string;size:number}>, selected: Array<{name:string;size:number}>): boolean {
   return expected.length > 0 && expected.length === selected.length &&
     expected.every((file,index)=>file.name===selected[index]?.name && file.size===selected[index]?.size);
@@ -699,7 +712,16 @@ export class RedditBrowserAdapter implements Adapter {
       const mainText=(await page.locator("main").first().innerText().catch(()=>"")).slice(0,2500);
       const explicitNotice=classifyRedditPostVisibility(postText,false);
       const bannerNotice=classifyRedditPostVisibility(mainText.slice(0,1200),false);
-      const result=explicitNotice.status!=="UNKNOWN" ? explicitNotice :
+      let listing:unknown;
+      try {
+        listing=await page.evaluate(async(url)=>{
+          const response=await fetch(url,{credentials:"include",headers:{Accept:"application/json"}});
+          return response.ok ? await response.json() : undefined;
+        },id.permalink+"?raw_json=1");
+      } catch { /* Missing Reddit listing data does not prove that a post is visible. */ }
+      const listingSignal=classifyRedditListingModeration(listing,id.fullname);
+      const result=listingSignal.status!=="UNKNOWN" ? listingSignal :
+        explicitNotice.status!=="UNKNOWN" ? explicitNotice :
         bannerNotice.status==="REMOVED" || bannerNotice.status==="PENDING_REVIEW" || bannerNotice.status==="DELETED" ? bannerNotice :
         classifyRedditPostVisibility(postText,found);
       return {...result,checked_at:new Date().toISOString()};

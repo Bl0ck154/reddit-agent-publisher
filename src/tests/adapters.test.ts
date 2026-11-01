@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { approvedCommentFieldAction, canonicalRedditPublishedPostUrl, detectRedditTargetUnavailableText, extractCommunityRulesText, formatSubredditRulesPayload, inferRedditBodyFormat, normalizeFlairOptions, redditCommentControlMatchesTarget, redditPreviewTargetScopeMustRemainVisible, redditVoteDirection, RedditBrowserAdapter, redditMediaFilesMatch, redditReadBackendOrder, classifyRedditPostVisibility, resolveRedditBodyFormat } from "../adapters/reddit-browser.js";
+import { approvedCommentFieldAction, canonicalRedditPublishedPostUrl, detectRedditTargetUnavailableText, extractCommunityRulesText, formatSubredditRulesPayload, inferRedditBodyFormat, normalizeFlairOptions, redditCommentControlMatchesTarget, redditPreviewTargetScopeMustRemainVisible, redditVoteDirection, RedditBrowserAdapter, redditMediaFilesMatch, redditReadBackendOrder, classifyRedditPostVisibility, classifyRedditListingModeration, resolveRedditBodyFormat } from "../adapters/reddit-browser.js";
 import type { Config } from "../config.js";
 import type { Draft } from "../types.js";
 
@@ -218,4 +218,13 @@ test("read backends fall back to other authenticated browser before Chrome; writ
   assert.deepEqual(redditReadBackendOrder("lightpanda",true,true),["lightpanda","obscura","chrome"]);
   assert.deepEqual(redditReadBackendOrder("lightpanda",false,false),["chrome"]);
   assert.deepEqual(redditReadBackendOrder("chrome",true,true),["chrome"]);
+});
+
+test("Reddit listing moderation is identity-bound and accepts only explicit removal flags",()=>{
+  const listing=(name:string,category:string|null)=>[{data:{children:[{kind:"t3",data:{name,removed_by_category:category}}]}}];
+  assert.equal(classifyRedditListingModeration(listing("t3_abc","moderator"),"t3_abc").status,"REMOVED");
+  assert.equal(classifyRedditListingModeration(listing("t3_abc","reddit"),"t3_abc").status,"REMOVED");
+  assert.equal(classifyRedditListingModeration(listing("t3_abc","automod_filtered"),"t3_abc").status,"PENDING_REVIEW");
+  assert.equal(classifyRedditListingModeration(listing("t3_abc",null),"t3_abc").status,"UNKNOWN");
+  assert.equal(classifyRedditListingModeration(listing("t3_other","moderator"),"t3_abc").status,"UNKNOWN");
 });
