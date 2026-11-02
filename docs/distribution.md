@@ -10,7 +10,7 @@ This page tracks channels where someone can discover or install Reddit MCP Publi
 
 **Repository:** https://github.com/Bl0ck154/reddit-mcp-publisher
 
-**Installation:** npm package not published as of 2 November 2026. Source installation is available from GitHub using the setup command in the README.
+**Installation:** Public npm package: https://www.npmjs.com/package/reddit-mcp-publisher . The source installer is also available on GitHub.
 
 **Category:** Communication / social media / browser automation.
 
@@ -20,8 +20,8 @@ This page tracks channels where someone can discover or install Reddit MCP Publi
 
 | Channel | Verified status | Next action |
 | --- | --- | --- |
-| GitHub | Public source and GitHub Release v0.3.2 | Keep install and checks current |
-| npm | First publish requires the npm account owner | Follow releasing.md |
+| GitHub | Public source and GitHub Release v0.3.2; 0.3.3 in preparation | Keep install and checks current |
+| npm | Version 0.3.2 published; 0.3.3 fixes MCP namespace metadata | Publish and verify 0.3.3 |
 | Official MCP Registry | server.json exists, not published | Publish after npm |
 | Glama | glama.json metadata prepared | Submit the GitHub repo with Add MCP Server, then claim |
 | Sagargupta16 awesome-mcp-servers | Already listed in Communication | Do not add a duplicate |

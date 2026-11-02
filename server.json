@@ -1,6 +1,6 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.bl0ck154/reddit-mcp-publisher",
+  "name": "io.github.Bl0ck154/reddit-mcp-publisher",
   "title": "Reddit MCP Publisher",
   "description": "Self-hosted Reddit MCP with LightPanda reads and owner-approved Chrome publishing.",
   "websiteUrl": "https://github.com/Bl0ck154/reddit-mcp-publisher",
@@ -8,13 +8,13 @@
     "url": "https://github.com/Bl0ck154/reddit-mcp-publisher",
     "source": "github"
   },
-  "version": "0.3.2",
+  "version": "0.3.3",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "reddit-mcp-publisher",
-      "version": "0.3.2",
+      "version": "0.3.3",
       "transport": {
         "type": "stdio"
       }

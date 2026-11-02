@@ -1,6 +1,6 @@
 {
   "name": "reddit-mcp-publisher",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Reddit MCP server with lightweight LightPanda reads, Chrome previews and owner-approved publishing.",
   "type": "module",
   "bin": {
@@ -69,7 +69,7 @@
     "url": "https://github.com/Bl0ck154/reddit-mcp-publisher/issues"
   },
   "license": "MIT",
-  "mcpName": "io.github.bl0ck154/reddit-mcp-publisher",
+  "mcpName": "io.github.Bl0ck154/reddit-mcp-publisher",
   "publishConfig": {
     "access": "public"
   }
