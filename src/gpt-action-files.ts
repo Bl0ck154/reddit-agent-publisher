@@ -73,6 +73,24 @@ export function validateGptActionFileUrl(value: string): URL {
   return url;
 }
 
+// ChatGPT image uploads sometimes reach agents without native openaiFileIdRefs.
+// Google Slides createImage exposes a short-lived sourceUrl pointing to the same
+// ChatGPT-owned blob. Keep this fallback on the *exact* verified blob host;
+// never accept arbitrary URLs, internal IPs, or generic Google Drive links.
+export function validateSlidesBridgeSourceUrl(value: string): URL {
+  let url: URL;
+  try { url = new URL(value); }
+  catch { throw new ActionFileError("SLIDES_BRIDGE_URL_INVALID", "Invalid Slides image source URL."); }
+  const host = url.hostname.toLowerCase();
+  if (url.protocol !== "https:" || url.username || url.password
+      || (url.port && url.port !== "443")
+      || host !== "oaisdmntprukwest.blob.core.windows.net"
+      || !url.pathname.startsWith("/files/")) {
+    throw new ActionFileError("SLIDES_BRIDGE_URL_BLOCKED", "Only the signed ChatGPT image source from Google Slides is supported.");
+  }
+  return url;
+}
+
 export function detectActionImage(buffer: Buffer): { mime_type: string; extension: string } {
   if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a]))) return { mime_type:"image/png",extension:"png" };
   if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return { mime_type:"image/jpeg",extension:"jpg" };
@@ -87,8 +105,8 @@ function safeName(value: unknown, index: number, extension: string): string {
   return base || `chatgpt-image-${index + 1}.${extension}`;
 }
 
-async function requestFile(urlValue: string, redirects = 0, accept = "*/*"): Promise<Buffer> {
-  const url = validateGptActionFileUrl(urlValue);
+async function requestFile(urlValue: string, redirects = 0, accept = "*/*", source: "gpt" | "slides" = "gpt"): Promise<Buffer> {
+  const url = source === "slides" ? validateSlidesBridgeSourceUrl(urlValue) : validateGptActionFileUrl(urlValue);
   const addresses = await dns.lookup(url.hostname, { all:true, verbatim:true });
   const selected = addresses.find(entry => isPublicAddress(entry.address));
   if (!selected || addresses.some(entry => !isPublicAddress(entry.address))) {
@@ -109,7 +127,7 @@ async function requestFile(urlValue: string, redirects = 0, accept = "*/*"): Pro
         response.resume();
         const location = response.headers.location;
         if (!location || redirects >= MAX_REDIRECTS) { fail(new ActionFileError("GPT_FILE_REDIRECT_BLOCKED", "The ChatGPT image redirect chain is invalid.", 502)); return; }
-        void requestFile(new URL(location,url).toString(),redirects + 1,accept).then(resolve,fail);
+        void requestFile(new URL(location,url).toString(),redirects + 1,accept,source).then(resolve,fail);
         return;
       }
       if (status < 200 || status >= 300) { response.resume(); fail(new ActionFileError("GPT_FILE_DOWNLOAD_FAILED", `ChatGPT image download returned HTTP ${status}.`, 502)); return; }
@@ -130,8 +148,24 @@ async function requestFile(urlValue: string, redirects = 0, accept = "*/*"): Pro
   });
 }
 
-async function requestImage(urlValue: string, redirects = 0): Promise<Buffer> {
-  return requestFile(urlValue,redirects,"image/png,image/jpeg,image/gif,image/webp");
+async function requestImage(urlValue: string, redirects = 0, source: "gpt" | "slides" = "gpt"): Promise<Buffer> {
+  return requestFile(urlValue,redirects,"image/png,image/jpeg,image/gif,image/webp",source);
+}
+
+// Stage one source image from a temporary Google Slides createImage object.
+// The signed URL is used once; only sanitized metadata and the private file path
+// are persisted. Callers must delete their temporary Slides presentation.
+export async function prepareSlidesBridgeImage(sourceUrl: string, stateDir: string, name?: string): Promise<PreparedActionImage> {
+  validateSlidesBridgeSourceUrl(sourceUrl);
+  const buffer = await requestImage(sourceUrl, 0, "slides");
+  const detected = detectActionImage(buffer);
+  const outputDir = path.join(stateDir, "artifacts", "gpt-files");
+  fs.mkdirSync(outputDir, { recursive:true, mode:0o700 });
+  fs.chmodSync(outputDir, 0o700);
+  const filePath = path.join(outputDir, `${crypto.randomUUID()}.${detected.extension}`);
+  fs.writeFileSync(filePath, buffer, { mode:0o600, flag:"wx" });
+  return { path:filePath, name:safeName(name, 0, detected.extension), mime_type:detected.mime_type, size:buffer.length,
+    sha256:`sha256:${crypto.createHash("sha256").update(buffer).digest("hex")}` };
 }
 
 export async function prepareGptActionImages(refs: Array<string | GptActionFileRef>, stateDir: string): Promise<PreparedActionImage[]> {
