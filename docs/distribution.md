@@ -1,36 +1,43 @@
 # Discoverability and catalog submissions
 
-This page tracks channels where someone can discover or install Reddit MCP Publisher. Record a listing link only after acceptance.
+Only mark a listing published after checking its public page. External catalogs may cache the previous repository name after GitHub renames.
 
-## Listing copy
+## Canonical metadata
 
 **Name:** Reddit MCP Publisher
 
-**Description:** Self-hosted Reddit MCP server with browser previews, rule checks, and owner-approved posting.
+**Description:** Self-hosted Reddit MCP server for reading Reddit, reviewing browser previews and publishing owner-approved posts, comments and messages.
 
 **Repository:** https://github.com/Bl0ck154/reddit-mcp-publisher
 
-**Installation:** Public npm package: https://www.npmjs.com/package/reddit-mcp-publisher . The source installer is also available on GitHub.
+**Website:** https://bl0ck154.github.io/reddit-mcp-publisher/ (after Pages deployment)
+
+**npm:** https://www.npmjs.com/package/reddit-mcp-publisher
+
+**Official MCP Registry:** https://registry.modelcontextprotocol.io/v0.1/servers/io.github.Bl0ck154%2Freddit-mcp-publisher/versions/0.3.3
 
 **Category:** Communication / social media / browser automation.
 
-**Notes:** TypeScript, MIT, self-hosted stdio MCP. Chrome/Chromium required for login and writes. LightPanda optional for authenticated supported reads. No public hosted endpoint. Reddit's moderation and automation restrictions still apply.
+**Limitations:** Local stdio MCP, owner-provided Reddit session and Chrome/Chromium for login and writes. LightPanda is optional for supported reads. No public hosted service, guaranteed publication, or Reddit affiliation.
 
-## Channels
+## Current channels (verified 2 November 2026)
 
-| Channel | Verified status | Next action |
+| Channel | Status | Follow-up |
 | --- | --- | --- |
-| GitHub | Public source and GitHub Release v0.3.2; 0.3.3 in preparation | Keep install and checks current |
-| npm | Version 0.3.2 published; 0.3.3 fixes MCP namespace metadata | Publish and verify 0.3.3 |
-| Official MCP Registry | server.json exists, not published | Publish after npm |
-| Glama | glama.json metadata prepared | Submit the GitHub repo with Add MCP Server, then claim |
-| Sagargupta16 awesome-mcp-servers | Already listed in Communication | Do not add a duplicate |
-| Other curated GitHub lists | Follow upstream PRs | Submit one factual entry per relevant directory |
-| Smithery | No public Streamable HTTP endpoint | Do not misrepresent stdio as hosted |
-| PulseMCP | Submission intake was paused when checked | Rely on registry ingestion |
+| GitHub | Public repository and Release v0.3.3 | Maintain docs |
+| npm | reddit-mcp-publisher@0.3.3 published | Trusted publishing configured; validate it during the next release |
+| Official MCP Registry | io.github.Bl0ck154/reddit-mcp-publisher@0.3.3 active | Publish metadata on new releases |
+| GitHub Pages | Source and deployment workflow provided | Check public page after merging |
+| Glama | Old reddit-agent-publisher entry still indexed | Claim and update or ask Glama to merge the outdated record |
+| Sagargupta16/awesome-mcp-servers | Existing entry under Communication | Avoid duplicate PR |
+| Other curated MCP directories | No acceptance verified | Submit factual descriptions selectively |
+| Smithery | No public hosted connector | Do not submit as hosted |
+| PulseMCP | Submission intake not verified | Check current process before submission |
 
-Do not claim official Reddit affiliation, a hosted public endpoint, guaranteed posting success, third-party adoption, or CAPTCHA bypass. Avoid repetitive promotional posts.
+## Update the old Glama listing
 
-## Measuring impact
+The [existing listing](https://glama.ai/mcp/servers/Bl0ck154/reddit-agent-publisher) still uses the old name and older install commands. The repository has a `glama.json` linking the GitHub maintainer. Open the listing and use **Claim** with the `Bl0ck154` GitHub identity. Update the display name, URL, description and installation instructions, or contact Glama for a listing merge if renaming is unavailable. Glama documents that re-running Claim refreshes `glama.json` changes.
 
-GitHub Insights / Traffic shows the last 14 days of views, unique visitors, clones, referrers and popular paths. The detailed counters are for owner analysis and should not be included in public submissions. After an entry is accepted, record the directory URL and acceptance date, then compare traffic and independent feedback.
+## Measurement
+
+Review GitHub Traffic, npm downloads (when available), external referrers, independently reported installs and issues. Avoid presenting maintainer tests as third-party user adoption. Do not mass-submit repeated directory listings.

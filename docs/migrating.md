@@ -1,6 +1,6 @@
 # Migrating to Reddit MCP Publisher (v0.3.1)
 
-The project name, GitHub repository, preferred CLI, prospective npm name and MCP Registry identity have changed:
+The project name, GitHub repository, preferred CLI, npm package name and MCP Registry identity have changed:
 
 | Surface | Old | New |
 | --- | --- | --- |
@@ -8,7 +8,7 @@ The project name, GitHub repository, preferred CLI, prospective npm name and MCP
 | GitHub source setup | npx -y github:Bl0ck154/reddit-agent-publisher setup | npx -y github:Bl0ck154/reddit-mcp-publisher setup |
 | Preferred CLI | reddit-agent-publisher | reddit-mcp-publisher |
 | npm (published) | reddit-agent-publisher | reddit-mcp-publisher |
-| MCP Registry (publication pending) | io.github.bl0ck154/reddit-agent-publisher | io.github.Bl0ck154/reddit-mcp-publisher |
+| MCP Registry (published) | io.github.bl0ck154/reddit-agent-publisher | io.github.Bl0ck154/reddit-mcp-publisher |
 
 The legacy **reddit-agent-publisher CLI executable remains available** in packages from v0.3.1.
 

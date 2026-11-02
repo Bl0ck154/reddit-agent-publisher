@@ -1,102 +1,81 @@
 # Reddit MCP Publisher
 
 [![CI](https://github.com/Bl0ck154/reddit-mcp-publisher/actions/workflows/ci.yml/badge.svg)](https://github.com/Bl0ck154/reddit-mcp-publisher/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/Bl0ck154/reddit-mcp-publisher)](https://github.com/Bl0ck154/reddit-mcp-publisher/releases/latest)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![npm](https://img.shields.io/npm/v/reddit-mcp-publisher)](https://www.npmjs.com/package/reddit-mcp-publisher)
+[![MCP Registry](https://img.shields.io/badge/MCP_Registry-listed-2463eb)](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.Bl0ck154%2Freddit-mcp-publisher/versions/0.3.3)
+[![MIT](https://img.shields.io/badge/license-MIT-64748b)](LICENSE)
 
-**Give an AI agent access to your own Reddit account, with a browser preview and owner-controlled publishing.** Read threads, subreddit rules, removal notices, inbox and Reddit Chat; prepare posts, comments and DMs; review the exact target before sending.
+**A self-hosted Reddit MCP server for AI agents that can read Reddit, preview drafts and publish with your approval.** Connect Codex, Claude Desktop, OpenCode or another MCP client to your own Reddit session. Read posts, threads, subreddit rules, inbox notifications and Reddit Chat; prepare posts, comments or DMs.
 
-Works with Codex, Claude Desktop, OpenCode and other MCP clients. Runs locally or on a VPS with your own authenticated Reddit session.
+The core browser workflow uses **no Reddit developer API key**. You still need your own Reddit sign-in in Chrome/Chromium. LightPanda is optional for supported authenticated reads, while Chrome handles login, previews and publishing.
 
-**LightPanda-first for supported reads.** When an encrypted authenticated snapshot is available, the lightweight [LightPanda](https://github.com/lightpanda-io/browser) backend is preferred for supported Reddit reads. The publisher falls back to another compatible browser when needed. **Chrome/Chromium is still required for login, live previews and all writes.**
+## Quick start
 
-## See the workflow
-
-*Illustrative demo, not a claim that this example was published or endorsed by a Reddit user.*
-
-**1. Tell your AI agent what to do**
-
-> Check the rules for r/test, draft a short post about a tool I built, and show me the preview. Do not publish yet.
-
-**2. The agent checks eligibility and prepares a draft**
-
-```bash
-reddit-mcp-publisher reddit-preflight test
-reddit-mcp-publisher prepare reddit-post --subreddit test \
-  --title "A small tool I built for Reddit workflows" \
-  --body "I built a self-hosted publisher with a review step. Feedback welcome."
-reddit-mcp-publisher preview <draft-id>
-```
-
-**3. Review the live Reddit preview**
-
-```text
-Destination: r/test
-Title:       A small tool I built for Reddit workflows
-Body:        I built a self-hosted publisher with a review step. Feedback welcome.
-Action:      Awaiting owner approval. Nothing has been posted.
-```
-
-**4. Approve the exact draft, then publish**
-
-```bash
-reddit-mcp-publisher approve <draft-id> --digest <preview-sha256>
-reddit-mcp-publisher publish <draft-id> --approval <approval-token>
-```
-
-The final result, **if the subreddit accepts the post**, is a Reddit permalink and a recorded publication status. Approval is interactive in the CLI, and the displayed placeholders come from real prepare/preview/approve responses. The publisher checks existing status before retrying an ambiguous write.
-
-![Publishing workflow: read, preview, approve, publish](assets/workflow.png)
-
-### Real browser preview
-
-![Cropped browser preview of an unpublished r/test draft](assets/reddit-preview-live-cropped.png)
-
-This is a real, cropped Reddit composer screenshot from a maintainer-run test on 2 November 2026. The preview filled the form without posting. [See the test steps and limits](docs/demo-live.md). The screenshot omits account information.
-
-
-## Install
-
-Requirements: **Node.js 22+, npm, Chrome/Chromium** and an owner-controlled Reddit login. LightPanda is optional; it needs a separately available authenticated snapshot to handle Reddit reads. On a headless VPS, browser login may need Xvfb/VNC over an SSH tunnel.
+Requires **Node.js 22+, npm and Chrome/Chromium**.
 
 ```bash
 npx -y reddit-mcp-publisher setup
 ```
 
-Choose your MCP client:
+For a specific MCP client:
 
 ```bash
 npx -y reddit-mcp-publisher setup --client codex
 npx -y reddit-mcp-publisher setup --client claude
 ```
 
-Setup writes MCP configs under `~/.local/share/reddit-agent-publisher/integrations/`. This legacy state path stays unchanged to protect existing installations. It preserves existing browser profiles and encryption keys on rerun. The installer does **not** ask an AI for your Reddit password.
+Setup creates local MCP configuration and preserves existing browser profiles and encryption keys. Your Reddit password and cookies remain in your browser. [Read the installation guide](docs/installation.md) for desktops and headless servers.
 
-**npm:** The package is public at https://www.npmjs.com/package/reddit-mcp-publisher . The GitHub-source installer remains available as an alternative. See [desktop, server and manual setup](docs/installation.md) and [migration notes](docs/migrating.md).
+![Illustrated workflow: read Reddit, preview a draft, approve the exact change, publish](assets/social-preview.png)
 
-## What it does
+## What it can do
 
-| Task | Built-in protection |
+| Task | What happens |
 | --- | --- |
-| Read a thread, inbox, current notification bell, subreddit rules and flairs | Read-only retrieval; no Reddit write |
-| Check whether an account may post | Separate karma and account-age preflight; relevant moderator notices |
-| Draft posts, replies, edits and comments | Exact target binding and live browser preview |
-| Post text, links, up to four images | Owner-approved publication with status/duplicate protection |
-| Read Reddit Chat and send a DM or attachment | Verified recipient/room, preview and persisted retry identity |
+| **Read Reddit from an AI agent** | Retrieve threads, subreddit rules, flairs, own activity, inbox and notification notices |
+| **Check eligibility before posting** | Check available karma and account-age requirements and block confidently ineligible destinations |
+| **Publish posts, comments and replies** | Bind exact target and text, show a live browser preview, then ask for approval |
+| **Reddit Chat and DMs** | Read conversations and prepare messages with verified recipients and supported attachments |
+| **Handle uncertain results** | Use recorded publication state to avoid blindly repeating a write |
 
-The server is self-hosted; there is no public hosted bot and no Reddit API key required for the core browser workflow. Reddit's own automation policies, rules and account restrictions still apply. Changes to Reddit's UI can require adapter fixes; uncertain actions stop rather than guessing.
+Reddit's moderation and automation rules still apply. Publishing may fail, and subreddit moderators can remove a post afterward. A changed browser UI or an authentication challenge can stop an operation.
 
-## When to use it
+## Real browser preview
 
-Use Reddit MCP Publisher when an AI agent needs to read Reddit context or prepare a Reddit post with an exact browser preview and explicit owner approval. It is a self-hosted Reddit posting MCP server that runs through an authenticated Chrome session. The core browser workflow does not require Reddit developer API credentials. Chrome is still needed for login and writes, and Reddit's own account rules and moderation apply.
+![Cropped real Reddit browser preview for an unpublished r/test example](assets/reddit-preview-live-cropped.png)
 
-## Documentation and community
+*Maintainer test on 2 November 2026: the form was filled, but no post was sent.* [Reproduction steps and limits](docs/demo-live.md).
 
-- [Installation and troubleshooting](docs/installation.md) · [Browser modes](docs/browser-modes.md)
-- [Features, architecture, security and MCP tools](docs/features.md) · [Custom GPT Actions](docs/gpt-actions.md)
-- [Release / npm / MCP Registry guide](docs/releasing.md) · [Directory submissions](docs/distribution.md) · [Changelog](CHANGELOG.md)
-- [Share a real use case or report a problem](docs/showcase.md) · [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
+Here is an **illustrative** terminal sequence. Replace placeholders with identifiers returned by the CLI:
 
-Independent users can submit reproducible examples with sensitive details removed. [Open an experience report](https://github.com/Bl0ck154/reddit-mcp-publisher/issues/new?template=experience.yml). We do not publish invented testimonials or count owner-created demos as third-party adoption.
+```bash
+reddit-mcp-publisher reddit-preflight test
+reddit-mcp-publisher prepare reddit-post --subreddit test --title "A tool for reviewing Reddit drafts" --body "I built a self-hosted tool. Feedback welcome."
+reddit-mcp-publisher preview <draft-id>
+```
 
-MIT licensed. Unaffiliated with Reddit.
+After inspecting the preview and deciding to publish:
+
+```bash
+reddit-mcp-publisher approve <draft-id> --digest <preview-sha256>
+reddit-mcp-publisher publish <draft-id> --approval <approval-token>
+```
+
+The publisher records publication status and the permalink when Reddit confirms submission. Approval is tied to a specific draft and destination.
+
+## Browser MCP vs Reddit API tools
+
+Reddit MCP Publisher operates through an authenticated browser session to handle surfaces such as Reddit Chat, notifications and the live posting composer. An API-based Reddit integration typically uses developer credentials and has a different set of supported endpoints and limits. Both must respect Reddit rules. The project is local/self-hosted: there is no public hosted account connection.
+
+## Docs and support
+
+- [Product overview](https://bl0ck154.github.io/reddit-mcp-publisher/) · [FAQ: Reddit MCP without an API key](docs/faq.md)
+- [Install for Claude, Codex, VPS](docs/installation.md) · [Browser modes](docs/browser-modes.md)
+- [Features and MCP tools](docs/features.md) · [ChatGPT Actions](docs/gpt-actions.md)
+- [Maintainer demo](docs/demo-live.md) · [Migration notes](docs/migrating.md)
+- [npm and MCP Registry release guide](docs/releasing.md) · [Directory listing status](docs/distribution.md)
+- [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
+
+Please [report bugs or share a reproducible use case](https://github.com/Bl0ck154/reddit-mcp-publisher/issues/new/choose). Independent user reports are tracked in [Showcase](docs/showcase.md). No external adoption or endorsements are claimed.
+
+MIT licensed. Not affiliated with Reddit.
