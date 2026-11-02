@@ -33,7 +33,7 @@ GitHub or an AI conversation.
 
 npm Trusted Publishing was configured on 2 November 2026 for GitHub owner
 Bl0ck154, repository reddit-mcp-publisher and workflow publish-npm.yml.
-Version 0.3.4 is intended as the first real end-to-end GitHub Trusted Publishing test. The npm workflow is manual and uses GitHub OIDC; verify a published version with:
+Version 0.3.4 was successfully published using GitHub Actions OIDC Trusted Publishing without manual 2FA. GitHub Actions run 41369381829 succeeded with signed provenance; the package became public after npm publish-time scanning. MCP Registry v0.3.4 was published by GitHub Actions run 41369968758 and independently verified active. The npm workflow is manual and uses GitHub OIDC; verify a published version with:
 
     npm view reddit-mcp-publisher version
     npx -y reddit-mcp-publisher --help
