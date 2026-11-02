@@ -3,7 +3,7 @@
 [![CI](https://github.com/Bl0ck154/reddit-mcp-publisher/actions/workflows/ci.yml/badge.svg)](https://github.com/Bl0ck154/reddit-mcp-publisher/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/reddit-mcp-publisher)](https://www.npmjs.com/package/reddit-mcp-publisher)
 [![MCP Registry](https://img.shields.io/badge/MCP_Registry-listed-2463eb)](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.Bl0ck154%2Freddit-mcp-publisher/versions/0.3.3)
-[![MIT](https://img.shields.io/badge/license-MIT-64748b)](LICENSE)
+[![MIT](https://img.shields.io/badge/license-MIT-64748b)](https://github.com/Bl0ck154/reddit-mcp-publisher/blob/main/LICENSE)
 
 **A self-hosted Reddit MCP server for AI agents that can read Reddit, preview drafts and publish with your approval.** Connect Codex, Claude Desktop, OpenCode or another MCP client to your own Reddit session. Read posts, threads, subreddit rules, inbox notifications and Reddit Chat; prepare posts, comments or DMs.
 
@@ -24,9 +24,9 @@ npx -y reddit-mcp-publisher setup --client codex
 npx -y reddit-mcp-publisher setup --client claude
 ```
 
-Setup creates local MCP configuration and preserves existing browser profiles and encryption keys. Your Reddit password and cookies remain in your browser. [Read the installation guide](docs/installation.md) for desktops and headless servers.
+Setup creates local MCP configuration and preserves existing browser profiles and encryption keys. Your Reddit password and cookies remain in your browser. [Read the installation guide](https://github.com/Bl0ck154/reddit-mcp-publisher/blob/main/docs/installation.md) for desktops and headless servers.
 
-![Illustrated workflow: read Reddit, preview a draft, approve the exact change, publish](assets/social-preview.png)
+![Illustrated workflow: read Reddit, preview a draft, approve the exact change, publish](https://raw.githubusercontent.com/Bl0ck154/reddit-mcp-publisher/main/assets/social-preview.png)
 
 ## What it can do
 
@@ -42,9 +42,9 @@ Reddit's moderation and automation rules still apply. Publishing may fail, and s
 
 ## Real browser preview
 
-![Cropped real Reddit browser preview for an unpublished r/test example](assets/reddit-preview-live-cropped.png)
+![Cropped real Reddit browser preview for an unpublished r/test example](https://raw.githubusercontent.com/Bl0ck154/reddit-mcp-publisher/main/assets/reddit-preview-live-cropped.png)
 
-*Maintainer test on 2 November 2026: the form was filled, but no post was sent.* [Reproduction steps and limits](docs/demo-live.md).
+*Maintainer test on 2 November 2026: the form was filled, but no post was sent.* [Reproduction steps and limits](https://github.com/Bl0ck154/reddit-mcp-publisher/blob/main/docs/demo-live.md).
 
 Here is an **illustrative** terminal sequence. Replace placeholders with identifiers returned by the CLI:
 
@@ -69,13 +69,13 @@ Reddit MCP Publisher operates through an authenticated browser session to handle
 
 ## Docs and support
 
-- [Product overview](https://bl0ck154.github.io/reddit-mcp-publisher/) · [FAQ: Reddit MCP without an API key](docs/faq.md)
-- [Install for Claude, Codex, VPS](docs/installation.md) · [Browser modes](docs/browser-modes.md)
-- [Features and MCP tools](docs/features.md) · [ChatGPT Actions](docs/gpt-actions.md)
-- [Maintainer demo](docs/demo-live.md) · [Migration notes](docs/migrating.md)
-- [npm and MCP Registry release guide](docs/releasing.md) · [Directory listing status](docs/distribution.md)
-- [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
+- [Product overview](https://bl0ck154.github.io/reddit-mcp-publisher/) · [FAQ: Reddit MCP without an API key](https://github.com/Bl0ck154/reddit-mcp-publisher/blob/main/docs/faq.md)
+- [Install for Claude, Codex, VPS](https://github.com/Bl0ck154/reddit-mcp-publisher/blob/main/docs/installation.md) · [Browser modes](https://github.com/Bl0ck154/reddit-mcp-publisher/blob/main/docs/browser-modes.md)
+- [Features and MCP tools](https://github.com/Bl0ck154/reddit-mcp-publisher/blob/main/docs/features.md) · [ChatGPT Actions](https://github.com/Bl0ck154/reddit-mcp-publisher/blob/main/docs/gpt-actions.md)
+- [Maintainer demo](https://github.com/Bl0ck154/reddit-mcp-publisher/blob/main/docs/demo-live.md) · [Migration notes](https://github.com/Bl0ck154/reddit-mcp-publisher/blob/main/docs/migrating.md)
+- [npm and MCP Registry release guide](https://github.com/Bl0ck154/reddit-mcp-publisher/blob/main/docs/releasing.md) · [Directory listing status](https://github.com/Bl0ck154/reddit-mcp-publisher/blob/main/docs/distribution.md)
+- [Contributing](https://github.com/Bl0ck154/reddit-mcp-publisher/blob/main/CONTRIBUTING.md) · [Security](https://github.com/Bl0ck154/reddit-mcp-publisher/blob/main/SECURITY.md) · [Changelog](https://github.com/Bl0ck154/reddit-mcp-publisher/blob/main/CHANGELOG.md)
 
-Please [report bugs or share a reproducible use case](https://github.com/Bl0ck154/reddit-mcp-publisher/issues/new/choose). Independent user reports are tracked in [Showcase](docs/showcase.md). No external adoption or endorsements are claimed.
+Please [report bugs or share a reproducible use case](https://github.com/Bl0ck154/reddit-mcp-publisher/issues/new/choose). Independent user reports are tracked in [Showcase](https://github.com/Bl0ck154/reddit-mcp-publisher/blob/main/docs/showcase.md). No external adoption or endorsements are claimed.
 
 MIT licensed. Not affiliated with Reddit.

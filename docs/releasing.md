@@ -33,7 +33,7 @@ GitHub or an AI conversation.
 
 npm Trusted Publishing was configured on 2 November 2026 for GitHub owner
 Bl0ck154, repository reddit-mcp-publisher and workflow publish-npm.yml.
-The first release via this relationship still needs an actual publication test. The npm workflow is manual and uses GitHub OIDC; verify a published version with:
+Version 0.3.4 is intended as the first real end-to-end GitHub Trusted Publishing test. The npm workflow is manual and uses GitHub OIDC; verify a published version with:
 
     npm view reddit-mcp-publisher version
     npx -y reddit-mcp-publisher --help

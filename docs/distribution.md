@@ -24,8 +24,8 @@ Only mark a listing published after checking its public page. External catalogs 
 
 | Channel | Status | Follow-up |
 | --- | --- | --- |
-| GitHub | Public repository and Release v0.3.3 | Maintain docs |
-| npm | reddit-mcp-publisher@0.3.3 published | Trusted publishing configured; validate it during the next release |
+| GitHub | Public repository and Release v0.3.3; v0.3.4 in preparation | Maintain docs |
+| npm | reddit-mcp-publisher@0.3.3 published; 0.3.4 pending Trusted Publishing test | Trusted publishing configured; validate it during the next release |
 | Official MCP Registry | io.github.Bl0ck154/reddit-mcp-publisher@0.3.3 active | Publish metadata on new releases |
 | GitHub Pages | Source and deployment workflow provided | Check public page after merging |
 | Glama | Old reddit-agent-publisher entry still indexed | Claim and update or ask Glama to merge the outdated record |
