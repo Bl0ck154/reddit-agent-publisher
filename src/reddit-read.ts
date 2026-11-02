@@ -1,5 +1,6 @@
 import type { Page } from "playwright-core";
 import { ExternalChrome } from "./external-chrome.js";
+import { ExternalRedditLightpanda } from "./external-reddit-lightpanda.js";
 import { detectRedditUsername } from "./reddit-identity.js";
 import { classifyRedditNotification } from "./reddit-preflight.js";
 
@@ -416,7 +417,7 @@ export async function fetchRedditBellNotifications(page: Page, limit=20): Promis
 }
 
 export class RedditReader {
-  constructor(private chrome: ExternalChrome) {}
+  constructor(private chrome: ExternalChrome | ExternalRedditLightpanda) {}
 
   async thread(account: string, inputUrl: string, limit = 50, depth = 6, context = 8, sort: "best"|"top"|"new"|"old"|"controversial"|"qa" = "best"): Promise<JsonObject> {
     const target = canonicalRedditThreadTarget(inputUrl);

@@ -7,6 +7,7 @@ import path from "node:path";
 import type { Page } from "playwright-core";
 import type { Config } from "./config.js";
 import { ExternalChrome } from "./external-chrome.js";
+import { ExternalRedditLightpanda } from "./external-reddit-lightpanda.js";
 
 type JsonObject = Record<string, any>;
 type TokenCache = { token: string; expiresAt?: number; userId?: string };
@@ -337,11 +338,11 @@ export function normalizeRedditChatMessages(value: unknown, ownUserId: string): 
 }
 
 export class RedditChat {
-  private chrome: ExternalChrome;
+  private chrome: ExternalChrome | ExternalRedditLightpanda;
   private tokens = new Map<string, TokenCache>();
   private profileNames = new Map<string, string>();
 
-  constructor(private config: Config) { this.chrome = new ExternalChrome(config, "reddit"); }
+  constructor(private config: Config, lightpandaReads = false) { this.chrome = lightpandaReads ? new ExternalRedditLightpanda(config) : new ExternalChrome(config, "reddit"); }
 
   async conversations(account: string, unreadOnly = false, limit = 25): Promise<JsonObject> {
     return this.withMatrix(account, async session => {
