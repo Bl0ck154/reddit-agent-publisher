@@ -10,7 +10,7 @@ Only mark a listing published after checking its public page. External catalogs 
 
 **Repository:** https://github.com/Bl0ck154/reddit-mcp-publisher
 
-**Website:** https://bl0ck154.github.io/reddit-mcp-publisher/ (after Pages deployment)
+**Website:** https://bl0ck154.github.io/reddit-mcp-publisher/ (live)
 
 **npm:** https://www.npmjs.com/package/reddit-mcp-publisher
 
@@ -27,7 +27,7 @@ Only mark a listing published after checking its public page. External catalogs 
 | GitHub | Public repository and Release v0.3.4 | Maintain docs |
 | npm | reddit-mcp-publisher@0.3.4 published via GitHub Trusted Publishing | Trusted publishing validated with v0.3.4 GitHub Actions (provenance signed) |
 | Official MCP Registry | io.github.Bl0ck154/reddit-mcp-publisher@0.3.4 active | Publish metadata on new releases |
-| GitHub Pages | Source and deployment workflow provided | Check public page after merging |
+| GitHub Pages | Live via GitHub Actions; HTML, sitemap and images return HTTP 200 | Verify search indexing over time |
 | Glama | Old reddit-agent-publisher entry still indexed | Claim and update or ask Glama to merge the outdated record |
 | Sagargupta16/awesome-mcp-servers | Existing entry under Communication | Avoid duplicate PR |
 | Other curated MCP directories | No acceptance verified | Submit factual descriptions selectively |
