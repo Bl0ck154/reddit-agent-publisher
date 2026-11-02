@@ -3,22 +3,36 @@ import fs from "node:fs";
 import http from "node:http";
 import { ensureState, loadConfig } from "./config.js";
 import { ExternalChrome } from "./external-chrome.js";
+import { ExternalRedditLightpanda } from "./external-reddit-lightpanda.js";
+import { withRedditReadFallback } from "./reddit-read-transport.js";
 import { RedditReader } from "./reddit-read.js";
 import { RedditChat } from "./reddit-chat.js";
 import { PublisherService } from "./service.js";
 import { envelope, type ResultEnvelope } from "./types.js";
 
 const config = loadConfig(); ensureState(config); const service = new PublisherService(config);
-const redditReader = new RedditReader(new ExternalChrome(config, "reddit"));
-const redditChat = new RedditChat(config);
+const preferLightpanda=config.redditBrowser === "lightpanda";
+const redditReader=new RedditReader(new ExternalRedditLightpanda(config));
+const chromeReader=new RedditReader(new ExternalChrome(config,"reddit"));
+const redditChat=new RedditChat(config,true);
+const chromeChat=new RedditChat(config);
 
-async function redditRead(work: () => Promise<unknown>): Promise<ResultEnvelope> {
+async function redditRead(work:(reader:RedditReader)=>Promise<unknown>):Promise<ResultEnvelope> {
   try {
-    return envelope({ adapter:"reddit", result:await work() });
-  } catch (error: any) {
-    const message = String(error?.message ?? error);
-    const code = message.match(/^([A-Z][A-Z0-9_]+):/)?.[1] ?? "INTERNAL_ERROR";
-    return envelope({ ok:false, adapter:"reddit", error:{ code, message } });
+    return envelope({adapter:"reddit",result:await withRedditReadFallback(()=>work(redditReader),()=>work(chromeReader),preferLightpanda)});
+  } catch(error:any) {
+    const message=String(error?.message??error);
+    const code=message.match(/^([A-Z][A-Z0-9_]+):/)?.[1]??"INTERNAL_ERROR";
+    return envelope({ok:false,adapter:"reddit",error:{code,message}});
+  }
+}
+async function redditChatRead(work:(chat:RedditChat)=>Promise<unknown>):Promise<ResultEnvelope> {
+  try {
+    return envelope({adapter:"reddit",result:await withRedditReadFallback(()=>work(redditChat),()=>work(chromeChat),preferLightpanda)});
+  } catch(error:any) {
+    const message=String(error?.message??error);
+    const code=message.match(/^([A-Z][A-Z0-9_]+):/)?.[1]??"INTERNAL_ERROR";
+    return envelope({ok:false,adapter:"reddit",error:{code,message}});
   }
 }
 
@@ -37,13 +51,13 @@ async function dispatch(method: string, p: any) {
     case "reddit_preflight": return service.redditPreflight(p.account ?? "default", p.subreddit, p.action ?? "post", {post_title:p.post_title,target_url:p.target_url});
     case "reddit_rules": return service.rules(p.account ?? "default", p.subreddit);
     case "reddit_flairs": return service.flairs(p.account ?? "default", p.subreddit);
-    case "reddit_thread": return redditRead(() => redditReader.thread(p.account ?? "default", p.url, p.limit ?? 50, p.depth ?? 6, p.context ?? 8, p.sort ?? "best"));
-    case "reddit_activity": return redditRead(() => redditReader.activity(p.account ?? "default", p.limit ?? 25, p.kind ?? "all"));
-    case "reddit_inbox": return redditRead(() => redditReader.inbox(p.account ?? "default", p.unread_only ?? true, p.limit ?? 25));
-    case "reddit_notifications": return redditRead(() => redditReader.notifications(p.account ?? "default", p.unread_only ?? true, p.limit ?? 25));
-    case "reddit_chat_list": return redditRead(() => redditChat.conversations(p.account ?? "default", p.unread_only ?? false, p.limit ?? 25));
-    case "reddit_chat_get": return redditRead(() => redditChat.room(p.account ?? "default", p.room_id, p.limit ?? 50));
-    case "reddit_chat_attachment_get": return redditRead(() => redditChat.attachment(p.account ?? "default", p.room_id, p.event_id));
+    case "reddit_thread": return redditRead(reader => reader.thread(p.account ?? "default", p.url, p.limit ?? 50, p.depth ?? 6, p.context ?? 8, p.sort ?? "best"));
+    case "reddit_activity": return redditRead(reader => reader.activity(p.account ?? "default", p.limit ?? 25, p.kind ?? "all"));
+    case "reddit_inbox": return redditRead(reader => reader.inbox(p.account ?? "default", p.unread_only ?? true, p.limit ?? 25));
+    case "reddit_notifications": return redditRead(reader => reader.notifications(p.account ?? "default", p.unread_only ?? true, p.limit ?? 25));
+    case "reddit_chat_list": return redditChatRead(chat => chat.conversations(p.account ?? "default", p.unread_only ?? false, p.limit ?? 25));
+    case "reddit_chat_get": return redditChatRead(chat => chat.room(p.account ?? "default", p.room_id, p.limit ?? 50));
+    case "reddit_chat_attachment_get": return redditChatRead(chat => chat.attachment(p.account ?? "default", p.room_id, p.event_id));
     case "diagnose": return service.diagnose(Boolean(p.live));
     case "artifact": return service.artifact(p.path,p.offset ?? 0,p.max_bytes ?? 8_000_000);
     default: throw new Error(`Unknown RPC method: ${method}`);
