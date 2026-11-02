@@ -7,8 +7,8 @@ The project name, GitHub repository, preferred CLI, prospective npm name and MCP
 | GitHub | Bl0ck154/reddit-agent-publisher | Bl0ck154/reddit-mcp-publisher |
 | GitHub source setup | npx -y github:Bl0ck154/reddit-agent-publisher setup | npx -y github:Bl0ck154/reddit-mcp-publisher setup |
 | Preferred CLI | reddit-agent-publisher | reddit-mcp-publisher |
-| npm (not published) | reddit-agent-publisher | reddit-mcp-publisher |
-| MCP Registry (not published) | io.github.bl0ck154/reddit-agent-publisher | io.github.bl0ck154/reddit-mcp-publisher |
+| npm (published) | reddit-agent-publisher | reddit-mcp-publisher |
+| MCP Registry (publication pending) | io.github.bl0ck154/reddit-agent-publisher | io.github.Bl0ck154/reddit-mcp-publisher |
 
 The legacy **reddit-agent-publisher CLI executable remains available** in packages from v0.3.1.
 

@@ -6,10 +6,10 @@ The CLI needs **Node.js 22+** and a local Chrome/Chromium installation. The Redd
 
 Requirements: **Node.js 22+**, npm, and Chrome/Chromium.
 
-### One-command setup from GitHub
+### One-command setup from npm
 
 ```bash
-npx -y github:Bl0ck154/reddit-mcp-publisher setup
+npx -y reddit-mcp-publisher setup
 ```
 
 The installer detects the machine type and does the repetitive setup for you:
@@ -28,14 +28,14 @@ The installer detects the machine type and does the repetitive setup for you:
 Useful variants:
 
 ```bash
-npx -y github:Bl0ck154/reddit-mcp-publisher setup --client codex
-npx -y github:Bl0ck154/reddit-mcp-publisher setup --mode server --client claude
+npx -y reddit-mcp-publisher setup --client codex
+npx -y reddit-mcp-publisher setup --mode server --client claude
 ```
 
-After an npm registry release, the shorter equivalent is:
+The GitHub source installer is also available as an alternative:
 
 ```bash
-npx -y reddit-mcp-publisher setup
+npx -y github:Bl0ck154/reddit-mcp-publisher setup
 ```
 
 Setup is safe to rerun: it keeps the existing master key and persistent Chrome profile instead of silently replacing them.
@@ -85,4 +85,4 @@ If the CLI is not on your PATH after the one-off `npx` setup, use the generated 
 
 ## Distribution status
 
-The GitHub source installer works independently of the npm registry. Do **not** use `npx -y reddit-mcp-publisher setup` until this package appears on [npm](https://www.npmjs.com/package/reddit-mcp-publisher). After its first successful npm release, that shorter command will become the recommended install path.
+The package is available on [npm](https://www.npmjs.com/package/reddit-mcp-publisher). Use the npm-based command above for a standard installation, or the GitHub source installer for development.

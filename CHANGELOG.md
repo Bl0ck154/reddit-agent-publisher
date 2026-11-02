@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.3.3 - 2026-11-02
+
+### MCP Registry authentication
+- Match the case-sensitive GitHub owner namespace in the npm mcpName marker and the MCP server manifest.
+- Enforce matching npm and MCP names in the registry publication workflow.
+- Switch installation documentation to the now-public npm package.
+
 ## 0.3.2 - 2026-11-02
 
 ### Distribution fixes

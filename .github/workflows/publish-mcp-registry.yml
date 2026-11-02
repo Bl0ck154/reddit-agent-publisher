@@ -40,7 +40,8 @@ jobs:
             assert.equal(manifest.version,version);
             assert.equal(manifest.packages?.[0]?.identifier,pkg.name);
             assert.equal(manifest.packages?.[0]?.version,version);
-            assert.equal(manifest.name,"io.github.bl0ck154/reddit-mcp-publisher");
+            assert.equal(manifest.name,"io.github.Bl0ck154/reddit-mcp-publisher");
+            assert.equal(pkg.mcpName,manifest.name);
           '
           npm view "reddit-mcp-publisher@$RELEASE_VERSION" version --json | tr -d '"' | grep -Fx "$RELEASE_VERSION"
       - name: Install official MCP publisher

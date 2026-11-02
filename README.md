@@ -60,19 +60,19 @@ This is a real, cropped Reddit composer screenshot from a maintainer-run test on
 Requirements: **Node.js 22+, npm, Chrome/Chromium** and an owner-controlled Reddit login. LightPanda is optional; it needs a separately available authenticated snapshot to handle Reddit reads. On a headless VPS, browser login may need Xvfb/VNC over an SSH tunnel.
 
 ```bash
-npx -y github:Bl0ck154/reddit-mcp-publisher setup
+npx -y reddit-mcp-publisher setup
 ```
 
 Choose your MCP client:
 
 ```bash
-npx -y github:Bl0ck154/reddit-mcp-publisher setup --client codex
-npx -y github:Bl0ck154/reddit-mcp-publisher setup --client claude
+npx -y reddit-mcp-publisher setup --client codex
+npx -y reddit-mcp-publisher setup --client claude
 ```
 
 Setup writes MCP configs under `~/.local/share/reddit-agent-publisher/integrations/`. This legacy state path stays unchanged to protect existing installations. It preserves existing browser profiles and encryption keys on rerun. The installer does **not** ask an AI for your Reddit password.
 
-**npm status:** the renamed npm package is not published yet. Until a verified publication, use the GitHub command above; do not use `npx reddit-mcp-publisher`. See [desktop, server and manual setup](docs/installation.md) and [migration notes](docs/migrating.md).
+**npm:** The package is public at https://www.npmjs.com/package/reddit-mcp-publisher . The GitHub-source installer remains available as an alternative. See [desktop, server and manual setup](docs/installation.md) and [migration notes](docs/migrating.md).
 
 ## What it does
 
