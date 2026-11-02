@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/Bl0ck154/reddit-mcp-publisher/actions/workflows/ci.yml/badge.svg)](https://github.com/Bl0ck154/reddit-mcp-publisher/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/reddit-mcp-publisher)](https://www.npmjs.com/package/reddit-mcp-publisher)
-[![MCP Registry](https://img.shields.io/badge/MCP_Registry-listed-2463eb)](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.Bl0ck154%2Freddit-mcp-publisher/versions/0.3.3)
+[![MCP Registry](https://img.shields.io/badge/MCP_Registry-listed-2463eb)](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.Bl0ck154%2Freddit-mcp-publisher/versions/0.3.4)
 [![MIT](https://img.shields.io/badge/license-MIT-64748b)](https://github.com/Bl0ck154/reddit-mcp-publisher/blob/main/LICENSE)
 
 **A self-hosted Reddit MCP server for AI agents that can read Reddit, preview drafts and publish with your approval.** Connect Codex, Claude Desktop, OpenCode or another MCP client to your own Reddit session. Read posts, threads, subreddit rules, inbox notifications and Reddit Chat; prepare posts, comments or DMs.

@@ -40,4 +40,4 @@ No guarantee. Subreddit rules, moderators and filters decide what remains visibl
 
 ## Where do I get it?
 
-[GitHub repository](https://github.com/Bl0ck154/reddit-mcp-publisher) · [npm package](https://www.npmjs.com/package/reddit-mcp-publisher) · [Official MCP Registry](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.Bl0ck154%2Freddit-mcp-publisher/versions/0.3.3)
+[GitHub repository](https://github.com/Bl0ck154/reddit-mcp-publisher) · [npm package](https://www.npmjs.com/package/reddit-mcp-publisher) · [Official MCP Registry](https://registry.modelcontextprotocol.io/v0.1/servers/io.github.Bl0ck154%2Freddit-mcp-publisher/versions/0.3.4)

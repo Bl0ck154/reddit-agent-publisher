@@ -14,7 +14,7 @@ Only mark a listing published after checking its public page. External catalogs 
 
 **npm:** https://www.npmjs.com/package/reddit-mcp-publisher
 
-**Official MCP Registry:** https://registry.modelcontextprotocol.io/v0.1/servers/io.github.Bl0ck154%2Freddit-mcp-publisher/versions/0.3.3
+**Official MCP Registry:** https://registry.modelcontextprotocol.io/v0.1/servers/io.github.Bl0ck154%2Freddit-mcp-publisher/versions/0.3.4
 
 **Category:** Communication / social media / browser automation.
 
@@ -24,9 +24,9 @@ Only mark a listing published after checking its public page. External catalogs 
 
 | Channel | Status | Follow-up |
 | --- | --- | --- |
-| GitHub | Public repository and Release v0.3.3; v0.3.4 in preparation | Maintain docs |
-| npm | reddit-mcp-publisher@0.3.3 published; 0.3.4 pending Trusted Publishing test | Trusted publishing configured; validate it during the next release |
-| Official MCP Registry | io.github.Bl0ck154/reddit-mcp-publisher@0.3.3 active | Publish metadata on new releases |
+| GitHub | Public repository and Release v0.3.4 | Maintain docs |
+| npm | reddit-mcp-publisher@0.3.4 published via GitHub Trusted Publishing | Trusted publishing validated with v0.3.4 GitHub Actions (provenance signed) |
+| Official MCP Registry | io.github.Bl0ck154/reddit-mcp-publisher@0.3.4 active | Publish metadata on new releases |
 | GitHub Pages | Source and deployment workflow provided | Check public page after merging |
 | Glama | Old reddit-agent-publisher entry still indexed | Claim and update or ask Glama to merge the outdated record |
 | Sagargupta16/awesome-mcp-servers | Existing entry under Communication | Avoid duplicate PR |
