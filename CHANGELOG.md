@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.3.4 - 2026-11-02
+
+### Documentation and distribution
+- Refresh the GitHub and npm README with setup-first instructions, live-preview evidence and accurate limitations.
+- Publish an SEO-ready static landing page, FAQ, sitemap and 1280x640 social image.
+- Correct published npm/MCP Registry documentation and link to the canonical website.
+
+
 ## 0.3.3 - 2026-11-02
 
 ### MCP Registry authentication
