@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import type { Adapter } from "../adapters/base.js";
 import { ensureState, type Config } from "../config.js";
-import { isFinalPublishFailure, redditChatMutationFingerprint, PublisherService } from "../service.js";
+import { isFinalPublishFailure, redditChatMutationFingerprint, redditModmailMutationFingerprint, PublisherService } from "../service.js";
 import type { Draft } from "../types.js";
 import { PublisherError } from "../errors.js";
 
@@ -103,4 +103,25 @@ test("publication status definitively reports a completed confirmed write",async
   const status=await service.publicationStatus(prepared.draft_id!);
   assert.equal(status.ok,true); assert.equal(status.side_effect.performed,false); assert.equal((status.result as any).published,true); assert.equal((status.result as any).status,"PUBLISHED"); assert.equal((status.result as any).draft_id,prepared.draft_id);
   service.store.db.close(); fs.rmSync(stateDir,{recursive:true,force:true});
+});
+
+test("Modmail retries cannot accidentally duplicate a previously delivered message",async()=>{
+  const {service,fake,stateDir}=setup();
+  const input={adapter:"reddit",account:"owner-main",action:"send_modmail",target:{subreddit:"openrouter"},content:{subject:"Review request",body:"Please review our post"},owner_command:true};
+  const draft={...input,id:"dryrun",state:"PREPARED"} as unknown as Draft;
+  assert.ok(redditModmailMutationFingerprint(draft));
+  assert.equal(redditModmailMutationFingerprint(draft),redditModmailMutationFingerprint({...draft,target:{subreddit:"OpenRouter"}}));
+  const publish=async()=>{
+    const p=await service.prepare(input);assert.equal(p.ok,true);
+    const preview=await service.preview(p.draft_id!);assert.equal(preview.ok,true);
+    const approval=await service.approve(p.draft_id!,(preview.preview as any).digest,'APPROVE '+p.draft_id!);
+    assert.equal(approval.ok,true);
+    return service.publish(p.draft_id!, (approval.result as any).approval_token);
+  };
+  const first=await publish();assert.equal(first.ok,true);
+  const second=await publish();assert.equal(second.ok,true);
+  assert.equal(second.side_effect.performed,false);
+  assert.equal((second.result as any).deduplicated_retry,true);
+  assert.equal(fake.publishes,1);
+  service.store.db.close();fs.rmSync(stateDir,{recursive:true,force:true});
 });

@@ -20,6 +20,7 @@ type RedditVoteState = RedditVoteDirection | "none" | "unknown";
 type PreviewSession = {
   page: Page; action: Draft["action"]; pageUrl: string; targetIdentity: string; targetScope: Locator;
   submit?: Locator; deleteControl?: Locator; titleField?: Locator; bodyField?: Locator; linkField?: Locator;
+  recipientField?: Locator; recipient?: string;
   title?: string; body?: string; outboundUrl?: string; flair?: string; flairControl?: Locator;
   mediaScope?: Locator;
   mediaField?: Locator;
@@ -259,6 +260,14 @@ export class RedditBrowserAdapter implements Adapter {
       if (!d.target.url || !String(d.content.body ?? "").trim()) throw new Error("An exact Reddit permalink and body are required");
       this.permalink(String(d.target.url));
       if (d.content.vote !== undefined) redditVoteDirection(d.content.vote);
+    } else if (d.action === "send_modmail") {
+      if (!d.target.subreddit || typeof d.target.subreddit !== "string") throw new Error("Exact subreddit is required for Modmail");
+      this.subreddit(String(d.target.subreddit));
+      const subject=String(d.content.subject ?? "").trim();
+      const body=String(d.content.body ?? "").trim();
+      if (!subject || subject.length>100 || !body || body.length>10_000)
+        throw new Error("Modmail requires a subject (1-100 chars) and message (1-10000 chars)");
+      if (d.target.recipient_username || d.target.room_id) throw new Error("Modmail must target a subreddit, never a user or Reddit Chat room");
     } else if (d.action === "send_chat_message") {
       const roomId = d.target.room_id === undefined ? "" : String(d.target.room_id);
       const recipient = d.target.recipient_username === undefined ? "" : String(d.target.recipient_username).trim();
@@ -603,7 +612,8 @@ export class RedditBrowserAdapter implements Adapter {
         }
       }
       let session: PreviewSession;
-      if (d.action === "create_post") session = await this.previewPost(page, d);
+      if (d.action === "send_modmail") session = await this.previewModmail(page, d);
+      else if (d.action === "create_post") session = await this.previewPost(page, d);
       else if (d.action === "create_comment") session = await this.previewComment(page, d);
       else if (d.action === "vote") session = await this.previewVote(page, d);
       else session = await this.previewOwnMutation(page, d);
@@ -615,6 +625,7 @@ export class RedditBrowserAdapter implements Adapter {
         ? `The exact Reddit target and ${session.voteDirection}vote control are verified. No vote was clicked.`
         : d.action === "create_comment" && session.voteDirection
           ? `The exact Reddit comment form and ${session.voteDirection}vote control are verified. The comment was not submitted and no vote was clicked.`
+          : d.action === "send_modmail" ? "The exact subreddit Modmail recipient and form are verified. No message has been sent."
           : "The exact Reddit form is ready; no Post/Comment/Save/Delete action was clicked.";
       return { summary: { backend: this.browserLabel(page), action: d.action, account: d.account, target: d.target, target_identity: session.targetIdentity,
         content, ...(session.voteDirection ? {vote:{direction:session.voteDirection,current_state:session.voteStateBefore}} : {}), current_url: page.url(), preflight, notice }, artifact_path: artifact, warnings: preflightWarnings };
@@ -647,6 +658,11 @@ export class RedditBrowserAdapter implements Adapter {
       if (s.action !== d.action || s.page.url() !== s.pageUrl) throw new Error("APPROVAL_STALE: Reddit page/action changed after preview");
       this.assertOrigin(s.page.url());
       if (d.action === "create_comment") await this.rebindCommentSession(d, s);
+      if (d.action === "send_modmail") {
+        const expected="/r/"+this.subreddit(String(d.target.subreddit));
+        if (!s.recipientField || (await s.recipientField.inputValue()).toLowerCase() !== expected.toLowerCase())
+          throw new Error("APPROVAL_STALE: subreddit Modmail recipient changed");
+      }
       await this.verifyForm(s);
       const before = s.page.url();
       if (d.action === "vote") {
@@ -663,11 +679,14 @@ export class RedditBrowserAdapter implements Adapter {
       } else {
         if (!s.submit || !await s.submit.isVisible()) throw new Error("APPROVAL_STALE: exact submit control disappeared");
         await s.submit.click();
-        if (d.action === "create_post") await this.waitPostCommitted(s, before);
+        if (d.action === "send_modmail") await this.waitModmailCommitted(s);
+        else if (d.action === "create_post") await this.waitPostCommitted(s, before);
         else if (s.bodyField) await this.waitComposerCommitted(s.bodyField);
       }
       const errors = await s.page.getByRole("alert").allTextContents().catch(() => []);
       if (errors.some(x => x.trim())) throw new Error(`PUBLISH_RESULT_AMBIGUOUS: Reddit alert: ${errors.join(" | ").slice(0, 300)}`);
+      if (d.action === "send_modmail")
+        return {status:"PUBLISHED",warnings:["Reddit cleared the native Modmail message form after Send. Independent delivery confirmation is not available; do not resend solely because there is no reply."]};
       if (d.action === "create_post") {
         const canonical = canonicalRedditPublishedPostUrl(s.page.url(), String(d.target.subreddit));
         if (!canonical) {
@@ -758,6 +777,46 @@ export class RedditBrowserAdapter implements Adapter {
     } finally {
       await this.releasePage(page, "default");
     }
+  }
+
+  private async previewModmail(page: Page, d: Draft): Promise<PreviewSession> {
+    const sub=this.subreddit(String(d.target.subreddit));
+    const expected="/r/"+sub;
+    await this.gotoRetry(page,"https://www.reddit.com/message/compose/?to="+encodeURIComponent(expected));
+    this.assertOrigin(page.url());
+    await this.requireAuth(page);
+    if (!new URL(page.url()).pathname.startsWith("/message/compose"))
+      throw new PublisherError("SITE_CHANGED","Reddit did not open the official Modmail compose form.");
+    const recipientField=page.locator('input[name="message-recipient-input"]');
+    const titleField=page.locator('input[name="message-title"]');
+    const bodyField=page.locator('textarea[name="message-content"]');
+    const submit=page.getByRole("button",{name:"Send",exact:true});
+    if ((await recipientField.count())!==1 || (await titleField.count())!==1 ||
+        (await bodyField.count())!==1 || (await submit.count())!==1)
+      throw new PublisherError("SITE_CHANGED","The Reddit Modmail compose fields are missing or ambiguous. Nothing was sent.");
+    await recipientField.waitFor({state:"visible",timeout:10_000});
+    if ((await recipientField.inputValue()).toLowerCase()!==expected.toLowerCase())
+      throw new PublisherError("MODMAIL_RECIPIENT_MISMATCH","Reddit did not preselect the exact subreddit recipient. Nothing was sent.");
+    const subject=String(d.content.subject), body=String(d.content.body);
+    await titleField.fill(subject);
+    await bodyField.fill(body);
+    if (!await submit.isVisible() || await submit.isDisabled()) throw new PublisherError("SITE_CHANGED","Modmail Send control is not ready");
+    return {page,action:d.action,pageUrl:page.url(),targetIdentity:"modmail:"+expected.toLowerCase(),
+      targetScope:page.locator("body"),recipientField,recipient:expected,titleField,title:subject,bodyField,body,submit};
+  }
+
+  private async waitModmailCommitted(s: PreviewSession): Promise<void> {
+    if (!s.bodyField || !s.titleField) throw new Error("APPROVAL_STALE: Modmail form fields missing");
+    for (let i=0;i<20;i++) {
+      const errors=await s.page.locator('[role="alert"],[aria-live="assertive"]').allTextContents().catch(()=>[] as string[]);
+      if (errors.some(x=>x.trim())) throw new Error("PUBLISH_RESULT_AMBIGUOUS: Reddit Modmail error: "+errors.join(" | ").slice(0,250));
+      const gone=!await s.bodyField.isVisible().catch(()=>false);
+      const empty=gone || ((await s.bodyField.inputValue().catch(()=>""))==="" &&
+        (await s.titleField.inputValue().catch(()=>""))==="");
+      if (empty) return;
+      await s.page.waitForTimeout(500);
+    }
+    throw new Error("PUBLISH_RESULT_AMBIGUOUS: Reddit did not clear the Modmail form. Do not retry automatically.");
   }
 
   private async previewPost(page: Page, d: Draft): Promise<PreviewSession> {
@@ -1357,9 +1416,24 @@ export class RedditBrowserAdapter implements Adapter {
   private async gate(page: Page): Promise<string | undefined> {
     const title = (await page.title()).trim();
     const text = (await page.locator("body").innerText().catch(() => "")).slice(0, 3000);
-    if (page.url().includes("/login") || await this.anyVisible(page, ["link", "button"], ui.login)) return "AUTH_REQUIRED: complete manual Reddit login via VNC";
-    if (/^blocked$/i.test(title) || /blocked by network security|whoa there|request has been blocked/i.test(text)) return "TAKEOVER_REQUIRED: Reddit presented a network-security/CAPTCHA gate; inspect it via VNC";
+    if (/^blocked$/i.test(title) || /blocked by network security|whoa there|request has been blocked/i.test(text))
+      return "TAKEOVER_REQUIRED: Reddit presented a network-security/CAPTCHA gate; inspect it via VNC";
     if (!title && !text.trim()) return "TAKEOVER_REQUIRED: Reddit returned an empty browser shell; inspect login/consent via VNC";
+    const loginSignal = page.url().includes("/login") || await this.anyVisible(page, ["link", "button"], ui.login);
+    if (loginSignal) {
+      // Reddit's web app may render a Log In control even while an existing
+      // cookie session remains authenticated. Verify its same-origin API
+      // before showing AUTH_REQUIRED or requesting another manual login.
+      const verified = await page.evaluate(async () => {
+        try {
+          const response = await fetch("/api/me.json?raw_json=1", {credentials:"include"});
+          if (!response.ok) return false;
+          const payload = await response.json() as {data?:{name?:string}};
+          return Boolean(payload?.data?.name);
+        } catch { return false; }
+      }).catch(() => false);
+      if (!verified) return "AUTH_REQUIRED: complete manual Reddit login via VNC";
+    }
     return undefined;
   }
 
