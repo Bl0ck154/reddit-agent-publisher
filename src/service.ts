@@ -28,6 +28,17 @@ export function redditChatMutationFingerprint(d: Draft, targetOverride?: string)
   return crypto.createHash("sha256").update(JSON.stringify([d.adapter,d.account,d.action,target,body,media])).digest("hex");
 }
 
+
+/** Exact subreddit+content fingerprint prevents duplicate sends after ambiguous Modmail network results. */
+export function redditModmailMutationFingerprint(d: Draft): string | undefined {
+  if (d.adapter !== "reddit" || d.action !== "send_modmail") return undefined;
+  const subreddit=String(d.target.subreddit ?? "").toLowerCase();
+  const subject=String(d.content.subject ?? "").trim();
+  const body=String(d.content.body ?? "").trim();
+  if (!/^[a-z0-9_]{2,21}$/.test(subreddit) || !subject || !body) return undefined;
+  return crypto.createHash("sha256").update(JSON.stringify([d.adapter,d.account,d.action,subreddit,subject,body])).digest("hex");
+}
+
 export class PublisherService {
   readonly store: Store;
   private adapters: Map<string, Adapter>;
@@ -144,9 +155,9 @@ export class PublisherService {
         const claimed=this.store.db.prepare("UPDATE drafts SET state='PUBLISHING', updated_at=? WHERE id=? AND state='APPROVED'").run(new Date().toISOString(),id);
         if(consumed.changes!==1||claimed.changes!==1) throw new Error("APPROVAL_STALE: publish claim failed");
       })();
-      const intentFingerprint=redditChatMutationFingerprint(d);
+      const intentFingerprint=redditChatMutationFingerprint(d) ?? redditModmailMutationFingerprint(d);
       const intent=intentFingerprint ? this.store.acquireMutationIntent({fingerprint:intentFingerprint,adapter:d.adapter,account:d.account,action:d.action,draft_id:id}) : undefined;
-      if (intent?.completed && intent.external_id) {
+      if (intent?.completed && (intent.external_id || d.action==="send_modmail")) {
         const now=new Date().toISOString();
         this.store.db.transaction(()=>{
           const changed=this.store.db.prepare("UPDATE drafts SET state='PUBLISHED', updated_at=? WHERE id=? AND state='PUBLISHING'").run(now,id);
@@ -156,8 +167,10 @@ export class PublisherService {
         this.store.audit("publication.retry_deduplicated",actor,id,{external_id:intent.external_id,fingerprint:intentFingerprint});
         this.lastMutation.set(lock,Date.now());
         return envelope({state:"PUBLISHED",adapter:d.adapter,account:d.account,draft_id:id,revision:d.revision,side_effect:{performed:false},
-          result:{status:"PUBLISHED",external_id:intent.external_id,already_published:true,deduplicated_retry:true},warnings:["Identical recent Reddit Chat write was already completed; the retry was deduplicated before another send."]});
+          result:{status:"PUBLISHED",external_id:intent.external_id,already_published:true,deduplicated_retry:true},warnings:[d.action==="send_modmail" ? "Identical recent Modmail was already submitted; no second message was sent." : "Identical recent Reddit Chat write was already completed; the retry was deduplicated before another send."]});
       }
+      if (d.action==="send_modmail" && intent?.reused && !intent.completed)
+        throw new Error("PUBLISH_RESULT_AMBIGUOUS: an identical recent Modmail may already have been submitted; review the previous attempt before sending again.");
       if (intent) d.execution={idempotency_key:intent.transaction_key,retry_intent_reused:intent.reused};
       const r = await this.adapter(d.adapter).publish(d);
       const aliasFingerprint=intentFingerprint && r.idempotency_alias_target ? redditChatMutationFingerprint(d,r.idempotency_alias_target) : undefined;

@@ -19,7 +19,7 @@ const prepareProtectedChatAttachment = async (artifactPath?: string) => {
 };
 
 
-server.registerTool("publication_prepare", { description:"Prepare exactly one owner-requested draft. This never publishes. Kept for compatibility; prefer the typed Reddit tools.", inputSchema:{ adapter:z.enum(["reddit"]),account,action:z.enum(["create_post","create_comment","send_chat_message","edit","delete","vote"]),target:z.record(z.unknown()),content:z.record(z.unknown()),owner_command:z.literal(true) } }, p=>run("prepare",{input:p}));
+server.registerTool("publication_prepare", { description:"Prepare exactly one owner-requested draft. This never publishes. Kept for compatibility; prefer the typed Reddit tools.", inputSchema:{ adapter:z.enum(["reddit"]),account,action:z.enum(["create_post","create_comment","send_chat_message","send_modmail","edit","delete","vote"]),target:z.record(z.unknown()),content:z.record(z.unknown()),owner_command:z.literal(true) } }, p=>run("prepare",{input:p}));
 server.registerTool("publication_preview", { description:"Preview one Reddit draft in the live browser; nothing is submitted.", inputSchema:{draft_id:z.string().uuid()} }, p=>run("preview",p));
 server.registerTool("publication_approve", { description:"Approve one fresh preview after the owner explicitly confirms in chat. Requires the exact preview digest and confirm=true; does not publish.", inputSchema:{draft_id:z.string().uuid(),preview_digest:z.string().regex(/^sha256:[a-f0-9]{64}$/),confirm:z.literal(true)} }, p=>run("approve",{draft_id:p.draft_id,preview_digest:p.preview_digest,confirmation:`APPROVE ${p.draft_id}`}));
 server.registerTool("publication_publish", { description:"Publish one previously previewed and explicitly approved draft.", inputSchema:{draft_id:z.string().uuid(),approval_token:z.string()} }, p=>run("publish",p));
@@ -30,6 +30,11 @@ server.registerTool("reddit_post_prepare", {
   description:"Prepare one Reddit post with a typed schema. This never clicks Post.",
   inputSchema:{subreddit:z.string().regex(/^[A-Za-z0-9_]{2,21}$/),title:z.string().min(1).max(300),body:z.string().max(40_000).optional(),url:redditUrl.optional(),flair:z.string().max(200).optional(),account}
 }, p=>run("prepare",{input:{adapter:"reddit",account:p.account,action:"create_post",target:{subreddit:p.subreddit},content:{title:p.title,body:p.body,url:p.url,flair:p.flair},owner_command:true}}));
+server.registerTool("reddit_modmail_prepare", {
+  description:"Prepare a native Reddit message to moderators of an exact subreddit. Verifies /r/<subreddit> recipient during preview; no send without explicit approval.",
+  inputSchema:{subreddit:z.string().regex(/^[A-Za-z0-9_]{2,21}$/),subject:z.string().min(1).max(100),body:z.string().min(1).max(10000),account}
+}, p=>run("prepare",{input:{adapter:"reddit",account:p.account,action:"send_modmail",target:{subreddit:p.subreddit},content:{subject:p.subject,body:p.body},owner_command:true}}));
+
 server.registerTool("reddit_comment_prepare", {
   description:"Prepare a top-level Reddit comment for an exact post permalink. This never submits it. Optional vote may be up/down only when the owner's instruction clearly expresses support/agreement or disagreement with that exact target; omit it when sentiment is ambiguous.",
   inputSchema:{url:redditUrl,body:z.string().min(1).max(40_000),vote:z.enum(["up","down"]).optional(),account}
