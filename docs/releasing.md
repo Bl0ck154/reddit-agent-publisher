@@ -31,9 +31,9 @@ If npm requires 2FA, use npm stage publish and have the account owner approve
 the staged release on npmjs.com. No 2FA codes or npm tokens need to be pasted into
 GitHub or an AI conversation.
 
-Set up npm Trusted Publishing under the package settings for GitHub owner
+npm Trusted Publishing was configured on 2 November 2026 for GitHub owner
 Bl0ck154, repository reddit-mcp-publisher and workflow publish-npm.yml.
-The npm workflow is manual and uses GitHub OIDC; verify a published version with:
+The first release via this relationship still needs an actual publication test. The npm workflow is manual and uses GitHub OIDC; verify a published version with:
 
     npm view reddit-mcp-publisher version
     npx -y reddit-mcp-publisher --help
