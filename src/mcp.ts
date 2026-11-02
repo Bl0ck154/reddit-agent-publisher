@@ -4,6 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { loadConfig } from "./config.js";
 import { rpc } from "./rpc.js";
+import { prepareSlidesBridgeImage } from "./gpt-action-files.js";
 
 const socket = loadConfig().socketPath;
 const server = new McpServer({ name:"reddit-agent-publisher", version:"0.2.0" });
@@ -26,10 +27,36 @@ server.registerTool("publication_publish", { description:"Publish one previously
 server.registerTool("publication_edit", { description:"Prepare (not execute) one edit draft. Kept for compatibility.", inputSchema:{adapter:z.enum(["reddit"]),account,target:z.record(z.unknown()),content:z.record(z.unknown()),owner_command:z.literal(true)} }, p=>run("prepare",{input:{...p,action:"edit"}}));
 server.registerTool("publication_delete", { description:"Prepare (not execute) one delete draft. Kept for compatibility.", inputSchema:{adapter:z.enum(["reddit"]),account,target:z.record(z.unknown()),owner_command:z.literal(true)} }, p=>run("prepare",{input:{...p,action:"delete",content:{}}}));
 
+const prepareProtectedPostImages = async (paths?: string[]) => {
+  if (!paths?.length) return undefined;
+  const items = await Promise.all(paths.map(async artifactPath => {
+    const env=await rpc(socket,"artifact",{path:artifactPath,offset:0,max_bytes:1,actor:"mcp"});
+    if(!env.ok) throw new Error(env.error?.message ?? "Protected Reddit image is unavailable");
+    const item=env.result as any;
+    const mime=String(item.mime_type);
+    if(!["image/png","image/jpeg","image/gif","image/webp"].includes(mime)) throw new Error("Prepared Reddit image has an unsupported type");
+    return {path:String(item.path),name:String(item.name),mime_type:mime,size:Number(item.size),sha256:String(item.sha256)};
+  }));
+  return items;
+};
+
+server.registerTool("reddit_image_stage_from_slides", {
+  description:"Default image bridge for ChatGPT MCP conversations where native image-file refs are unavailable. First create a temporary Google Slides presentation, add the user's attached image with createImage and read that image's sourceUrl. Pass that signed sourceUrl here; Publisher downloads only the verified ChatGPT blob host to its protected gpt-files folder, without publishing or persisting the signed URL. Delete the temporary Google Slides file afterward. Then use reddit_post_prepare.image_artifact_paths with the returned path.",
+  inputSchema:{source_url:z.string().url(),filename:z.string().max(120).optional()}
+}, async p=>{
+  const staged=await prepareSlidesBridgeImage(p.source_url,loadConfig().stateDir,p.filename);
+  const result={image_artifact_path:staged.path,name:staged.name,mime_type:staged.mime_type,size:staged.size,sha256:staged.sha256};
+  return {content:[{type:"text" as const,text:JSON.stringify(result)}],structuredContent:result};
+});
+
 server.registerTool("reddit_post_prepare", {
   description:"Prepare one Reddit post with a typed schema. This never clicks Post.",
-  inputSchema:{subreddit:z.string().regex(/^[A-Za-z0-9_]{2,21}$/),title:z.string().min(1).max(300),body:z.string().max(40_000).optional(),url:redditUrl.optional(),flair:z.string().max(200).optional(),account}
-}, p=>run("prepare",{input:{adapter:"reddit",account:p.account,action:"create_post",target:{subreddit:p.subreddit},content:{title:p.title,body:p.body,url:p.url,flair:p.flair},owner_command:true}}));
+  inputSchema:{subreddit:z.string().regex(/^[A-Za-z0-9_]{2,21}$/),title:z.string().min(1).max(300),body:z.string().max(40_000).optional(),url:redditUrl.optional(),flair:z.string().max(200).optional(),image_artifact_paths:z.array(z.string()).min(1).max(4).optional(),account}
+}, async p=>{
+  if(p.url && p.image_artifact_paths?.length) throw new Error("Reddit image posts cannot also be link posts");
+  const media_files=await prepareProtectedPostImages(p.image_artifact_paths);
+  return run("prepare",{input:{adapter:"reddit",account:p.account,action:"create_post",target:{subreddit:p.subreddit},content:{title:p.title,body:p.body??"",url:p.url,flair:p.flair,media_files},owner_command:true}});
+});
 server.registerTool("reddit_modmail_prepare", {
   description:"Prepare a native Reddit message to moderators of an exact subreddit. Verifies /r/<subreddit> recipient during preview; no send without explicit approval.",
   inputSchema:{subreddit:z.string().regex(/^[A-Za-z0-9_]{2,21}$/),subject:z.string().min(1).max(100),body:z.string().min(1).max(10000),account}
